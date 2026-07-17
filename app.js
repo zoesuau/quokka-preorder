@@ -29,6 +29,7 @@ function bindEvents() {
   document.getElementById("addToCart").addEventListener("click", addSelectedProduct);
   document.getElementById("openCheckout").addEventListener("click", openCheckout);
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
+  document.getElementById("paymentForm").addEventListener("submit", confirmPayment);
   document.getElementById("myOrdersButton").addEventListener("click", showMyOrders);
   document.getElementById("backToCatalog").addEventListener("click", showCatalog);
   document.getElementById("checkoutItems").addEventListener("click", (event) => {
@@ -38,6 +39,10 @@ function bindEvents() {
     updateCart();
     renderCheckout();
     if (!state.cart.length) document.getElementById("checkoutDialog").close();
+  });
+  document.getElementById("orderList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-payment-order]");
+    if (button) openPaymentDialog({ orderNo: button.dataset.paymentOrder, depositTotal: Number(button.dataset.paymentDeposit || 0) });
   });
 }
 
@@ -206,7 +211,6 @@ async function submitOrder(event) {
       lineDisplayName: state.line.displayName,
       customerName: document.getElementById("customerName").value.trim(),
       phone: document.getElementById("phone").value.trim(),
-      transferLast5: document.getElementById("transferLast5").value.trim(),
       note: document.getElementById("note").value.trim(),
       items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, qty: item.qty })),
     };
@@ -216,14 +220,48 @@ async function submitOrder(event) {
     updateCart();
     document.getElementById("checkoutDialog").close();
     document.getElementById("orderForm").reset();
-    alert(`預購已送出！\n訂單編號：${result.orderNo}\n本次訂金：NT$${formatNumber(result.depositTotal)}`);
     await showMyOrders();
+    openPaymentDialog(result);
   } catch (error) {
     console.error(error);
     showToast(error.message === "PRODUCT_CHANGED" ? "商品資訊已更新，請重新整理後再送出" : "送出失敗，請稍後再試");
   } finally {
     button.disabled = false;
-    button.textContent = "送出預購並登記訂金";
+    button.textContent = "先送出預購訂單";
+  }
+}
+
+function openPaymentDialog(order) {
+  document.getElementById("paymentOrderNo").value = order.orderNo || "";
+  document.getElementById("paymentOrderLabel").textContent = order.orderNo || "";
+  document.getElementById("paymentDepositLabel").textContent = `NT$${formatNumber(order.depositTotal)}`;
+  document.getElementById("paymentTransferLast5").value = "";
+  document.getElementById("paymentDialog").showModal();
+}
+
+async function confirmPayment(event) {
+  event.preventDefault();
+  if (!state.line.idToken) return showToast("請先完成 LINE 登入");
+  const button = document.getElementById("confirmPayment");
+  button.disabled = true;
+  button.textContent = "正在回報…";
+  try {
+    const result = await apiPost({
+      action: "confirmPreorderPayment",
+      idToken: state.line.idToken,
+      orderNo: document.getElementById("paymentOrderNo").value,
+      transferLast5: document.getElementById("paymentTransferLast5").value.trim(),
+    });
+    if (!result.ok) throw new Error(result.error || "PAYMENT_CONFIRM_FAILED");
+    document.getElementById("paymentDialog").close();
+    showToast("匯款資料已送出，等待賣家確認");
+    await showMyOrders();
+  } catch (error) {
+    const message = error.message === "INVALID_TRANSFER_LAST5" ? "請輸入正確的匯款後五碼" : "回報失敗，請稍後再試";
+    showToast(message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "送出匯款確認";
   }
 }
 
@@ -258,7 +296,9 @@ function showCatalog() {
 }
 
 function renderOrder(order) {
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待確認訂金")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>已登記訂金</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>預估尾款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
+  const pendingPayment = (order.status || "") === "待匯款";
+  const paymentButton = pendingPayment ? `<button class="payment-action" type="button" data-payment-order="${escapeAttr(order.orderNo)}" data-payment-deposit="${escapeAttr(order.depositTotal)}">匯款後回報</button>` : "";
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待匯款")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>${pendingPayment ? "應付訂金" : "已登記訂金"}</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>預估尾款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${paymentButton}</article>`;
 }
 
 async function apiPost(payload) {

@@ -41,6 +41,7 @@ function doPost(e) {
     var action = String(data.action || "").trim();
 
     if (action === "createPreorder") return handleCreatePreorder_(data);
+    if (action === "confirmPreorderPayment") return handleConfirmPreorderPayment_(data);
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
     if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
@@ -149,10 +150,10 @@ function handleCreatePreorder_(data) {
       estimatedTotal,
       depositTotal,
       estimatedBalance,
-      "銀行轉帳",
-      String(data.transferLast5 || "").trim(),
+      "",
+      "",
       cleanText_(data.note, 300),
-      "待確認訂金"
+      "待匯款"
     ]);
     return json_({
       ok: true,
@@ -161,6 +162,35 @@ function handleCreatePreorder_(data) {
       depositTotal: depositTotal,
       estimatedBalance: estimatedBalance
     });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleConfirmPreorderPayment_(data) {
+  var profile = verifyLineIdToken_(data.idToken);
+  var orderNo = String(data.orderNo || "").trim();
+  var transferLast5 = String(data.transferLast5 || "").trim();
+  if (!orderNo) throw new Error("ORDER_NOT_FOUND");
+  if (!/^\d{5}$/.test(transferLast5)) throw new Error("INVALID_TRANSFER_LAST5");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) throw new Error("ORDER_NOT_FOUND");
+    var values = sheet.getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length).getDisplayValues();
+    for (var index = values.length - 1; index >= 0; index--) {
+      var row = values[index];
+      if (String(row[0]).trim() !== orderNo) continue;
+      if (String(row[2]).trim() !== profile.sub) throw new Error("ORDER_FORBIDDEN");
+      sheet.getRange(index + 2, 13).setValue("銀行轉帳");
+      sheet.getRange(index + 2, 14).setValue(transferLast5);
+      sheet.getRange(index + 2, 16).setValue("待確認訂金");
+      return json_({ ok: true, orderNo: orderNo, status: "待確認訂金" });
+    }
+    throw new Error("ORDER_NOT_FOUND");
   } finally {
     lock.releaseLock();
   }
@@ -296,7 +326,6 @@ function handleAdminSaveSettings_(data) {
 function validatePreorderFields_(data) {
   if (!data || !Array.isArray(data.items) || !data.items.length) throw new Error("INVALID_ITEMS");
   if (!String(data.customerName || "").trim() || !String(data.phone || "").trim()) throw new Error("INVALID_CUSTOMER");
-  if (!/^\d{5}$/.test(String(data.transferLast5 || "").trim())) throw new Error("INVALID_TRANSFER_LAST5");
 }
 
 function validateProduct_(source) {
@@ -461,6 +490,7 @@ function safeError_(error) {
   var allowed = [
     "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "ADMIN_ACCESS_CODE_MISSING", "ADMIN_LOGIN_FAILED", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
     "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
+    "ORDER_NOT_FOUND", "ORDER_FORBIDDEN",
     "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
     "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING"
   ];

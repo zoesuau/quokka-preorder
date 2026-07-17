@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=20260717-payment" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="app.js" defer></script>
+    <script src="app.js?v=20260717-payment" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -111,16 +111,33 @@
         <h3 class="form-title">聯絡資料</h3>
         <label class="field"><span>訂購人姓名 *</span><input id="customerName" required maxlength="30" autocomplete="name" /></label>
         <label class="field"><span>手機號碼 *</span><input id="phone" required maxlength="20" inputmode="tel" autocomplete="tel" /></label>
-        <div class="transfer-info"><strong>訂金匯款資訊</strong><p id="bankTransferInfo">請依賣家提供的帳號完成訂金匯款。</p></div>
-        <label class="field"><span>匯款後五碼 *</span><input id="transferLast5" required maxlength="5" minlength="5" inputmode="numeric" pattern="[0-9]{5}" placeholder="請先完成訂金匯款" /></label>
+        <div class="order-first-note"><strong>先送出訂單，再進行匯款</strong><p>訂單成立後會顯示訂金匯款對話窗；完成匯款後，再輸入帳號後五碼回報。</p></div>
         <label class="field"><span>備註</span><textarea id="note" maxlength="300" rows="3" placeholder="其他想告訴我們的事"></textarea></label>
 
         <label class="agreement">
           <input type="checkbox" id="agreement" required />
           <span>我了解這是預購商品；採購成功後取消訂單，訂金不予退還。若韓國現場缺貨，該商品訂金將退回。</span>
         </label>
-        <button class="primary-button submit-button" id="submitOrder" type="submit">送出預購並登記訂金</button>
+        <button class="primary-button submit-button" id="submitOrder" type="submit">先送出預購訂單</button>
       </form>
+    </dialog>
+
+    <dialog class="checkout-dialog payment-dialog" id="paymentDialog">
+      <div class="checkout-header">
+        <div><p class="eyebrow">PAYMENT</p><h2>回報訂金匯款</h2></div>
+        <form method="dialog"><button class="dialog-close" aria-label="關閉">×</button></form>
+      </div>
+      <div class="payment-order-summary">
+        <span>訂單編號</span><strong id="paymentOrderLabel"></strong>
+        <span>應付訂金</span><strong id="paymentDepositLabel"></strong>
+      </div>
+      <div class="transfer-info"><strong>訂金匯款資訊</strong><p id="bankTransferInfo">請依賣家提供的帳號完成訂金匯款。</p></div>
+      <form id="paymentForm">
+        <input id="paymentOrderNo" type="hidden" />
+        <label class="field"><span>匯款帳號後五碼 *</span><input id="paymentTransferLast5" required maxlength="5" minlength="5" inputmode="numeric" pattern="[0-9]{5}" placeholder="完成匯款後再填寫" /></label>
+        <button class="primary-button" id="confirmPayment" type="submit">送出匯款確認</button>
+      </form>
+      <form method="dialog"><button class="later-button" type="submit">稍後再匯款</button></form>
     </dialog>
 
     <div class="toast" id="toast" role="status"></div>

@@ -90,6 +90,13 @@ dialog::backdrop { background: rgba(55,43,36,.52); backdrop-filter: blur(3px); }
 .transfer-info { margin: 16px 0 4px; padding: 13px; border: 1px dashed #d8bba8; border-radius: 13px; background: #fffaf4; }
 .transfer-info strong { color: var(--peach-dark); font-size: .82rem; }
 .transfer-info p { margin: 5px 0 0; color: var(--muted); font-size: .8rem; line-height: 1.55; white-space: pre-wrap; }
+.order-first-note { margin: 16px 0 4px; padding: 13px; border-radius: 13px; background: #eef3e9; }
+.order-first-note strong { color: #60764e; font-size: .86rem; }
+.order-first-note p { margin: 5px 0 0; color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.payment-order-summary { display: grid; grid-template-columns: 1fr auto; gap: 7px 14px; margin: 18px 0 10px; padding: 14px; border-radius: 14px; background: #faf2e8; }
+.payment-order-summary span { color: var(--muted); font-size: .78rem; }
+.payment-order-summary strong { text-align: right; }
+.later-button { width: 100%; margin-top: 9px; padding: 12px; border: 0; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; }
 .agreement { display: flex; gap: 9px; align-items: start; margin: 20px 0; color: var(--muted); font-size: .78rem; line-height: 1.55; }
 .agreement input { flex: none; margin-top: 3px; }
 .submit-button { margin-bottom: max(0px, env(safe-area-inset-bottom)); }
@@ -105,6 +112,7 @@ dialog::backdrop { background: rgba(55,43,36,.52); backdrop-filter: blur(3px); }
 .order-money div { display: grid; gap: 3px; }
 .order-money span { color: var(--muted); font-size: .66rem; }
 .order-money strong { font-size: .82rem; }
+.payment-action { width: 100%; margin-top: 13px; padding: 11px; border: 1px solid var(--peach-dark); border-radius: 12px; background: white; color: var(--peach-dark); font-weight: 700; cursor: pointer; }
 .toast { position: fixed; z-index: 100; left: 50%; bottom: 92px; max-width: calc(100% - 32px); padding: 11px 15px; border-radius: 12px; background: #302822; color: white; font-size: .82rem; opacity: 0; pointer-events: none; transform: translate(-50%, 12px); transition: .2s ease; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
