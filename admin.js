@@ -76,7 +76,13 @@ async function loginWithAccessCode(event) {
     document.getElementById("adminLoginForm").reset();
     await enterAdminWorkspace();
   } catch (error) {
-    feedback.textContent = "登入碼不正確，請重新輸入。";
+    const messages = {
+      ADMIN_LOGIN_FAILED: "登入碼不正確，請重新輸入。",
+      ADMIN_ACCESS_CODE_MISSING: "後端尚未設定管理登入碼。",
+      UNSUPPORTED_ACTION: "後端版本尚未更新，請稍後再試。",
+      SERVER_ERROR: "後端暫時無法登入，請稍後再試。",
+    };
+    feedback.textContent = messages[error.message] || `登入失敗（${error.message}）`;
   } finally {
     button.disabled = false;
     button.textContent = "登入後台";
