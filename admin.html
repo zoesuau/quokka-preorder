@@ -21,6 +21,18 @@
     </header>
 
     <main class="admin-main">
+      <section class="admin-login-card" id="adminLoginCard">
+        <p class="eyebrow">ADMIN SIGN IN</p>
+        <h2>登入商品後台</h2>
+        <p>請輸入管理登入碼，登入後可用手機新增、修改與上下架商品。</p>
+        <form id="adminLoginForm">
+          <label class="field"><span>管理登入碼</span><input id="adminAccessCode" type="password" inputmode="numeric" autocomplete="current-password" required /></label>
+          <button class="primary-button" id="adminLoginButton" type="submit">登入後台</button>
+        </form>
+        <div class="login-feedback" id="adminLoginFeedback"></div>
+      </section>
+
+      <div id="adminWorkspace" hidden>
       <section class="admin-intro">
         <div><strong id="activeCount">0</strong><span>上架中</span></div>
         <div><strong id="totalCount">0</strong><span>全部商品</span></div>
@@ -48,6 +60,7 @@
 
       <div class="status-panel" id="adminStatus">正在確認管理員身分…</div>
       <section class="admin-product-list" id="adminProductList"></section>
+      </div>
     </main>
 
     <dialog class="editor-dialog" id="productEditor">

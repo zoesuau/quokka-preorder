@@ -42,6 +42,7 @@ function doPost(e) {
 
     if (action === "createPreorder") return handleCreatePreorder_(data);
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
+    if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
@@ -53,6 +54,16 @@ function doPost(e) {
     console.error(error);
     return json_({ ok: false, error: safeError_(error) });
   }
+}
+
+function handleAdminLogin_(data) {
+  var expectedCode = PropertiesService.getScriptProperties().getProperty("ADMIN_ACCESS_CODE") || "";
+  var providedCode = String(data && data.accessCode || "").trim();
+  if (!expectedCode) throw new Error("ADMIN_ACCESS_CODE_MISSING");
+  if (!providedCode || providedCode !== expectedCode) throw new Error("ADMIN_LOGIN_FAILED");
+  var token = Utilities.getUuid() + Utilities.getUuid();
+  CacheService.getScriptCache().put("admin-session-" + token, "1", 21600);
+  return json_({ ok: true, adminSessionToken: token, expiresIn: 21600 });
 }
 
 function setupQuokkaPreorder() {
@@ -176,13 +187,13 @@ function handleReadMyPreorders_(data) {
 }
 
 function handleAdminReadProducts_(data) {
-  requireAdmin_(data.idToken);
+  requireAdmin_(data.idToken, data.adminSessionToken);
   setupQuokkaPreorder();
   return json_({ ok: true, products: readProducts_(), settings: readSettings_() });
 }
 
 function handleAdminSaveProduct_(data) {
-  requireAdmin_(data.idToken);
+  requireAdmin_(data.idToken, data.adminSessionToken);
   var product = validateProduct_(data.product);
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -208,7 +219,7 @@ function handleAdminSaveProduct_(data) {
 }
 
 function handleAdminToggleProduct_(data) {
-  requireAdmin_(data.idToken);
+  requireAdmin_(data.idToken, data.adminSessionToken);
   var productId = String(data.productId || "").trim();
   if (!productId || typeof data.active !== "boolean") throw new Error("INVALID_PRODUCT");
   var lock = LockService.getScriptLock();
@@ -228,7 +239,7 @@ function handleAdminToggleProduct_(data) {
 }
 
 function handleAdminUploadProductImage_(data) {
-  requireAdmin_(data.idToken);
+  requireAdmin_(data.idToken, data.adminSessionToken);
   var mimeType = String(data.mimeType || "").trim();
   var base64Data = String(data.base64Data || "").trim();
   if (["image/jpeg", "image/png", "image/webp"].indexOf(mimeType) === -1 || !base64Data) {
@@ -249,7 +260,7 @@ function handleAdminUploadProductImage_(data) {
 }
 
 function handleAdminSaveSettings_(data) {
-  requireAdmin_(data.idToken);
+  requireAdmin_(data.idToken, data.adminSessionToken);
   var source = data.settings || {};
   var settings = {
     exchangeRate: Number(source.exchangeRate),
@@ -352,7 +363,11 @@ function readSettings_() {
   return settings;
 }
 
-function requireAdmin_(idToken) {
+function requireAdmin_(idToken, adminSessionToken) {
+  var token = String(adminSessionToken || "").trim();
+  if (token && CacheService.getScriptCache().get("admin-session-" + token) === "1") {
+    return { sub: "access-code-admin", name: "Admin" };
+  }
   var profile = verifyLineIdToken_(idToken);
   var rawIds = PropertiesService.getScriptProperties().getProperty("ADMIN_LINE_USER_IDS") || "";
   var ids = rawIds.split(",").map(function (value) { return value.trim(); }).filter(Boolean);
@@ -444,7 +459,7 @@ function json_(payload) { return ContentService.createTextOutput(JSON.stringify(
 function safeError_(error) {
   var message = String(error && error.message || error || "UNKNOWN_ERROR");
   var allowed = [
-    "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
+    "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "ADMIN_ACCESS_CODE_MISSING", "ADMIN_LOGIN_FAILED", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
     "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
     "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
     "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING"

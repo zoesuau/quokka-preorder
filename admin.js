@@ -1,21 +1,37 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-const adminState = { products: [], settings: { exchangeRate: .022, depositPerItem: 50 }, idToken: "", uploadBusy: false };
+const adminState = { products: [], settings: { exchangeRate: .022, depositPerItem: 50 }, idToken: "", sessionToken: "", uploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
 
 async function initAdmin() {
   bindAdminEvents();
+  const savedSession = sessionStorage.getItem("quokkaAdminSession") || "";
+  if (savedSession) {
+    adminState.sessionToken = savedSession;
+    try {
+      await enterAdminWorkspace();
+      return;
+    } catch (error) {
+      sessionStorage.removeItem("quokkaAdminSession");
+      adminState.sessionToken = "";
+    }
+  }
+  if (!CONFIG.adminLiffId && !CONFIG.liffId) {
+    showAdminLogin();
+    return;
+  }
   try {
     await initAdminLine();
-    await loadAdminProducts();
+    await enterAdminWorkspace();
   } catch (error) {
     if (!["LIFF_NOT_CONFIGURED", "API_NOT_CONFIGURED", "LINE_LOGIN_REDIRECT"].includes(error.message)) console.error(error);
-    document.getElementById("adminStatus").textContent = friendlyAdminError(error.message);
+    showAdminLogin(friendlyAdminError(error.message));
   }
 }
 
 function bindAdminEvents() {
+  document.getElementById("adminLoginForm").addEventListener("submit", loginWithAccessCode);
   document.getElementById("newProduct").addEventListener("click", () => openEditor());
   document.getElementById("refreshProducts").addEventListener("click", loadAdminProducts);
   document.getElementById("productSearch").addEventListener("input", renderAdminProducts);
@@ -25,6 +41,46 @@ function bindAdminEvents() {
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
+}
+
+function showAdminLogin(message = "") {
+  document.getElementById("adminLoginCard").hidden = false;
+  document.getElementById("adminWorkspace").hidden = true;
+  document.getElementById("adminLoginFeedback").textContent = message;
+}
+
+async function enterAdminWorkspace() {
+  document.getElementById("adminLoginCard").hidden = true;
+  document.getElementById("adminWorkspace").hidden = false;
+  await loadAdminProducts();
+}
+
+async function loginWithAccessCode(event) {
+  event.preventDefault();
+  if (!CONFIG.apiUrl) return showAdminLogin("尚未設定 GAS API。");
+  const button = document.getElementById("adminLoginButton");
+  const feedback = document.getElementById("adminLoginFeedback");
+  button.disabled = true;
+  button.textContent = "登入中…";
+  feedback.textContent = "";
+  try {
+    const response = await fetch(`${CONFIG.apiUrl}?t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "adminLogin", accessCode: document.getElementById("adminAccessCode").value.trim() }),
+    });
+    const result = await response.json();
+    if (!result.ok || !result.adminSessionToken) throw new Error(result.error || "ADMIN_LOGIN_FAILED");
+    adminState.sessionToken = result.adminSessionToken;
+    sessionStorage.setItem("quokkaAdminSession", result.adminSessionToken);
+    document.getElementById("adminLoginForm").reset();
+    await enterAdminWorkspace();
+  } catch (error) {
+    feedback.textContent = "登入碼不正確，請重新輸入。";
+  } finally {
+    button.disabled = false;
+    button.textContent = "登入後台";
+  }
 }
 
 async function initAdminLine() {
@@ -199,7 +255,7 @@ function updateAdminPricePreview() {
 }
 
 async function adminPost(payload) {
-  const response = await fetch(`${CONFIG.apiUrl}?t=${Date.now()}`, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...payload, idToken: adminState.idToken }) });
+  const response = await fetch(`${CONFIG.apiUrl}?t=${Date.now()}`, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...payload, idToken: adminState.idToken, adminSessionToken: adminState.sessionToken }) });
   return response.json();
 }
 

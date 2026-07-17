@@ -4,6 +4,10 @@
 .admin-header .eyebrow { color: #f3b998; }
 .admin-refresh { padding: 8px 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 10px; background: transparent; color: white; font-size: .78rem; }
 .admin-main { width: min(100%, 760px); margin: auto; padding: 16px 14px 80px; }
+.admin-login-card { max-width: 430px; margin: 36px auto; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: white; box-shadow: 0 12px 34px rgba(79,57,43,.1); }
+.admin-login-card h2 { margin: 4px 0 8px; }
+.admin-login-card > p:not(.eyebrow) { color: var(--muted); font-size: .84rem; line-height: 1.65; }
+.login-feedback { min-height: 1.5em; margin-top: 10px; color: var(--peach-dark); font-size: .78rem; text-align: center; }
 .admin-intro { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; }
 .admin-intro > div { display: grid; align-content: center; padding: 15px; border-radius: 16px; background: white; box-shadow: 0 5px 18px rgba(79,57,43,.06); }
 .admin-intro strong { font-size: 1.5rem; }
