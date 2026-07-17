@@ -183,12 +183,33 @@ function handleCreatePreorder_(data) {
 function pushOrderSuccessCard_(lineUserId, order) {
   var accessToken = PropertiesService.getScriptProperties().getProperty("LINE_MESSAGING_ACCESS_TOKEN") || "";
   if (!accessToken || !lineUserId) return false;
+  var message = buildOrderSuccessMessage_(order);
+  var payload = { to: lineUserId, messages: [message] };
+  try {
+    var response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + accessToken },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var code = response.getResponseCode();
+    if (code >= 200 && code < 300) {
+      console.log("LINE push sent: " + order.orderNo);
+      return true;
+    }
+    console.error("LINE push failed: " + code + " " + response.getContentText());
+  } catch (error) {
+    console.error("LINE push failed: " + safeError_(error));
+  }
+  return false;
+}
+
+function buildOrderSuccessMessage_(order) {
   var transferInfo = String(order.bankTransferInfo || "").trim() || "請直接在 LINE 對話中向鼠購易確認匯款帳戶。";
   var reportText = "您好，我要回報匯款\n訂單編號：" + order.orderNo + "\n匯款後五碼：";
   var reportUrl = "https://line.me/R/oaMessage/%40527tnlnn/?" + encodeURIComponent(reportText);
-  var payload = {
-    to: lineUserId,
-    messages: [{
+  return {
       type: "flex",
       altText: "訂單已成立｜" + order.orderNo + "｜應付訂金 NT$" + formatMoney_(order.depositTotal),
       contents: {
@@ -227,23 +248,7 @@ function pushOrderSuccessCard_(lineUserId, order) {
           }]
         }
       }
-    }]
-  };
-  try {
-    var response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
-      method: "post",
-      contentType: "application/json",
-      headers: { Authorization: "Bearer " + accessToken },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-    var code = response.getResponseCode();
-    if (code >= 200 && code < 300) return true;
-    console.error("LINE push failed: " + code + " " + response.getContentText());
-  } catch (error) {
-    console.error("LINE push failed: " + safeError_(error));
-  }
-  return false;
+    };
 }
 
 function moneyRow_(label, value, valueColor) {
