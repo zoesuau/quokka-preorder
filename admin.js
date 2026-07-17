@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", initAdmin);
 
 async function initAdmin() {
   bindAdminEvents();
+  switchAdminPage(location.hash === "#products" ? "products" : "orders");
   const savedSession = sessionStorage.getItem("quokkaAdminSession") || "";
   if (savedSession) {
     adminState.sessionToken = savedSession;
@@ -45,6 +46,20 @@ function bindAdminEvents() {
   document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
   document.getElementById("shippingFilter").addEventListener("change", renderAdminOrders);
   document.getElementById("bankQrInput").addEventListener("change", uploadBankQr);
+  document.querySelector(".admin-page-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-admin-page]");
+    if (button) switchAdminPage(button.dataset.adminPage);
+  });
+}
+
+function switchAdminPage(page) {
+  const selected = page === "products" ? "products" : "orders";
+  document.getElementById("adminOrdersPage").hidden = selected !== "orders";
+  document.getElementById("adminProductsPage").hidden = selected !== "products";
+  document.querySelectorAll("[data-admin-page]").forEach((button) => button.classList.toggle("active", button.dataset.adminPage === selected));
+  document.getElementById("adminPageTitle").textContent = selected === "orders" ? "訂單管理" : "商品管理";
+  history.replaceState(null, "", `#${selected}`);
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function showAdminLogin(message = "") {

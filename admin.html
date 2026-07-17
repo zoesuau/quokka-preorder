@@ -9,14 +9,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260717-winter" />
-    <link rel="stylesheet" href="admin.css?v=20260717-orders" />
+    <link rel="stylesheet" href="admin.css?v=20260718-pages" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260717-orders" defer></script>
+    <script src="admin.js?v=20260718-pages" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
-      <div><p class="eyebrow">MOBILE ADMIN</p><h1>旅途商品後台</h1></div>
+      <div><p class="eyebrow">MOBILE ADMIN</p><h1 id="adminPageTitle">訂單管理</h1></div>
       <button class="admin-refresh" type="button" id="refreshProducts">重新整理</button>
     </header>
 
@@ -33,11 +33,12 @@
       </section>
 
       <div id="adminWorkspace" hidden>
-      <section class="admin-intro">
-        <div><strong id="activeCount">0</strong><span>上架中</span></div>
-        <div><strong id="totalCount">0</strong><span>全部商品</span></div>
-        <button class="primary-button" type="button" id="newProduct">＋ 新增商品</button>
-      </section>
+      <nav class="admin-page-tabs" aria-label="後台頁面">
+        <button class="active" type="button" data-admin-page="orders">訂單管理</button>
+        <button type="button" data-admin-page="products">商品管理</button>
+      </nav>
+
+      <section class="admin-page-panel" id="adminOrdersPage">
 
       <section class="purchase-summary-card">
         <div class="purchase-summary-heading"><div><p class="eyebrow">PURCHASE TOTAL</p><h2>採買統計</h2></div><span>不含已取消訂單</span></div>
@@ -55,6 +56,14 @@
           <select id="shippingFilter" aria-label="出貨狀態"><option value="unshipped">未出貨</option><option value="all">全部訂單</option><option value="shipped">已出貨</option></select>
         </div>
         <div class="admin-order-list" id="adminOrderList"></div>
+      </section>
+      </section>
+
+      <section class="admin-page-panel" id="adminProductsPage" hidden>
+      <section class="admin-intro">
+        <div><strong id="activeCount">0</strong><span>上架中</span></div>
+        <div><strong id="totalCount">0</strong><span>全部商品</span></div>
+        <button class="primary-button" type="button" id="newProduct">＋ 新增商品</button>
       </section>
 
       <details class="settings-card">
@@ -92,6 +101,7 @@
 
       <div class="status-panel" id="adminStatus">正在確認管理員身分…</div>
       <section class="admin-product-list" id="adminProductList"></section>
+      </section>
       </div>
     </main>
 
