@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="admin.css?v=20260717-winter" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260717-access-code" defer></script>
+    <script src="admin.js?v=20260717-purchase-summary" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -37,6 +37,15 @@
         <div><strong id="activeCount">0</strong><span>上架中</span></div>
         <div><strong id="totalCount">0</strong><span>全部商品</span></div>
         <button class="primary-button" type="button" id="newProduct">＋ 新增商品</button>
+      </section>
+
+      <section class="purchase-summary-card">
+        <div class="purchase-summary-heading"><div><p class="eyebrow">PURCHASE TOTAL</p><h2>採買統計</h2></div><span>不含已取消訂單</span></div>
+        <div class="purchase-total-grid">
+          <div><strong id="orderCount">0</strong><span>總訂單數</span></div>
+          <div><strong id="orderedItemCount">0</strong><span>商品總件數</span></div>
+        </div>
+        <div class="purchase-item-list" id="purchaseItemList"></div>
       </section>
 
       <details class="settings-card">

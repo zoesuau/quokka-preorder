@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-const adminState = { products: [], settings: { exchangeRate: .022, depositPerItem: 50 }, idToken: "", sessionToken: "", uploadBusy: false };
+const adminState = { products: [], settings: { exchangeRate: .022, depositPerItem: 50 }, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
@@ -108,8 +108,19 @@ async function loadAdminProducts() {
   if (!result.ok) throw new Error(result.error || "READ_FAILED");
   adminState.products = result.products || [];
   adminState.settings = { ...adminState.settings, ...(result.settings || {}) };
+  adminState.purchaseSummary = result.purchaseSummary || { orderCount: 0, totalQty: 0, items: [] };
   fillSettings();
+  renderPurchaseSummary();
   renderAdminProducts();
+}
+
+function renderPurchaseSummary() {
+  const summary = adminState.purchaseSummary;
+  document.getElementById("orderCount").textContent = formatNumber(summary.orderCount);
+  document.getElementById("orderedItemCount").textContent = formatNumber(summary.totalQty);
+  document.getElementById("purchaseItemList").innerHTML = summary.items?.length
+    ? summary.items.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}</span><b>× ${formatNumber(item.qty)}</b></div>`).join("")
+    : `<p>目前還沒有訂單。</p>`;
 }
 
 function renderAdminProducts() {

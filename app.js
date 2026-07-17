@@ -29,7 +29,6 @@ function bindEvents() {
   document.getElementById("addToCart").addEventListener("click", addSelectedProduct);
   document.getElementById("openCheckout").addEventListener("click", openCheckout);
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
-  document.getElementById("paymentForm").addEventListener("submit", confirmPayment);
   document.getElementById("myOrdersButton").addEventListener("click", showMyOrders);
   document.getElementById("backToCatalog").addEventListener("click", showCatalog);
   document.getElementById("checkoutItems").addEventListener("click", (event) => {
@@ -39,10 +38,6 @@ function bindEvents() {
     updateCart();
     renderCheckout();
     if (!state.cart.length) document.getElementById("checkoutDialog").close();
-  });
-  document.getElementById("orderList").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-payment-order]");
-    if (button) openPaymentDialog({ orderNo: button.dataset.paymentOrder, depositTotal: Number(button.dataset.paymentDeposit || 0) });
   });
 }
 
@@ -96,7 +91,6 @@ function renderCatalog() {
   const visible = state.category === "全部" ? state.products : state.products.filter((product) => product.category === state.category);
   document.getElementById("productCount").textContent = `${visible.length} 件商品`;
   document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。若韓國現場缺貨，該商品訂金將全額退回。";
-  document.getElementById("bankTransferInfo").textContent = state.settings.bankTransferInfo || "請依賣家提供的帳號完成訂金匯款。";
   const grid = document.getElementById("productGrid");
   grid.innerHTML = visible.map((product) => {
     const twd = toTwd(product.krwPrice);
@@ -201,6 +195,7 @@ async function submitOrder(event) {
   event.preventDefault();
   if (!CONFIG.apiUrl) return showToast("尚未設定 GAS API，現在是版面預覽模式");
   if (!state.line.idToken) return showToast("請從 LINE 開啟此頁並完成登入");
+  if (!await ensureOfficialAccountFriend()) return showToast("請先加入鼠購易官方帳號，才能送出訂單");
   const button = document.getElementById("submitOrder");
   button.disabled = true;
   button.textContent = "正在送出預購…";
@@ -220,8 +215,10 @@ async function submitOrder(event) {
     updateCart();
     document.getElementById("checkoutDialog").close();
     document.getElementById("orderForm").reset();
+    alert(result.botMessageSent
+      ? `訂單已成立！\n訂單編號：${result.orderNo}\n匯款資訊已傳送到鼠購易 LINE 對話。`
+      : `訂單已成立！\n訂單編號：${result.orderNo}\n小卡暫時未送達，請直接聯絡鼠購易確認匯款資訊。`);
     await showMyOrders();
-    openPaymentDialog(result);
   } catch (error) {
     console.error(error);
     showToast(error.message === "PRODUCT_CHANGED" ? "商品資訊已更新，請重新整理後再送出" : "送出失敗，請稍後再試");
@@ -231,37 +228,16 @@ async function submitOrder(event) {
   }
 }
 
-function openPaymentDialog(order) {
-  document.getElementById("paymentOrderNo").value = order.orderNo || "";
-  document.getElementById("paymentOrderLabel").textContent = order.orderNo || "";
-  document.getElementById("paymentDepositLabel").textContent = `NT$${formatNumber(order.depositTotal)}`;
-  document.getElementById("paymentTransferLast5").value = "";
-  document.getElementById("paymentDialog").showModal();
-}
-
-async function confirmPayment(event) {
-  event.preventDefault();
-  if (!state.line.idToken) return showToast("請先完成 LINE 登入");
-  const button = document.getElementById("confirmPayment");
-  button.disabled = true;
-  button.textContent = "正在回報…";
+async function ensureOfficialAccountFriend() {
   try {
-    const result = await apiPost({
-      action: "confirmPreorderPayment",
-      idToken: state.line.idToken,
-      orderNo: document.getElementById("paymentOrderNo").value,
-      transferLast5: document.getElementById("paymentTransferLast5").value.trim(),
-    });
-    if (!result.ok) throw new Error(result.error || "PAYMENT_CONFIRM_FAILED");
-    document.getElementById("paymentDialog").close();
-    showToast("匯款資料已送出，等待賣家確認");
-    await showMyOrders();
+    let friendship = await liff.getFriendship();
+    if (friendship.friendFlag) return true;
+    if (typeof liff.requestFriendship === "function") await liff.requestFriendship();
+    friendship = await liff.getFriendship();
+    return Boolean(friendship.friendFlag);
   } catch (error) {
-    const message = error.message === "INVALID_TRANSFER_LAST5" ? "請輸入正確的匯款後五碼" : "回報失敗，請稍後再試";
-    showToast(message);
-  } finally {
-    button.disabled = false;
-    button.textContent = "送出匯款確認";
+    console.warn("OA friendship check failed", error);
+    return false;
   }
 }
 
@@ -296,9 +272,7 @@ function showCatalog() {
 }
 
 function renderOrder(order) {
-  const pendingPayment = (order.status || "") === "待匯款";
-  const paymentButton = pendingPayment ? `<button class="payment-action" type="button" data-payment-order="${escapeAttr(order.orderNo)}" data-payment-deposit="${escapeAttr(order.depositTotal)}">匯款後回報</button>` : "";
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待匯款")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>${pendingPayment ? "應付訂金" : "已登記訂金"}</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>預估尾款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${paymentButton}</article>`;
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待人工確認")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>應付訂金</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>預估尾款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
 }
 
 async function apiPost(payload) {

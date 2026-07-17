@@ -3,6 +3,7 @@
  *
  * 部署前請在「專案設定 → 指令碼屬性」加入：
  * LINE_CHANNEL_ID       LINE Login Channel ID（數字）
+ * LINE_MESSAGING_ACCESS_TOKEN  Messaging API 長效權杖
  * ADMIN_LINE_USER_IDS   可使用後台的 LINE User ID，多個以逗號分隔
  * SPREADSHEET_ID        選填；綁定試算表時可不填
  */
@@ -92,6 +93,7 @@ function handleCreatePreorder_(data) {
   var profile = verifyLineIdToken_(data.idToken);
   validatePreorderFields_(data);
   var lock = LockService.getScriptLock();
+  var orderResult;
   lock.waitLock(20000);
   try {
     setupQuokkaPreorder();
@@ -153,18 +155,109 @@ function handleCreatePreorder_(data) {
       "",
       "",
       cleanText_(data.note, 300),
-      "待匯款"
+      "待人工確認"
     ]);
-    return json_({
-      ok: true,
+    orderResult = {
       orderNo: orderNo,
+      itemsSummary: itemsSummary,
+      totalQty: totalQty,
       estimatedTotal: estimatedTotal,
       depositTotal: depositTotal,
-      estimatedBalance: estimatedBalance
-    });
+      estimatedBalance: estimatedBalance,
+      bankTransferInfo: settings.bankTransferInfo
+    };
   } finally {
     lock.releaseLock();
   }
+  var botMessageSent = pushOrderSuccessCard_(profile.sub, orderResult);
+  return json_({
+    ok: true,
+    orderNo: orderResult.orderNo,
+    estimatedTotal: orderResult.estimatedTotal,
+    depositTotal: orderResult.depositTotal,
+    estimatedBalance: orderResult.estimatedBalance,
+    botMessageSent: botMessageSent
+  });
+}
+
+function pushOrderSuccessCard_(lineUserId, order) {
+  var accessToken = PropertiesService.getScriptProperties().getProperty("LINE_MESSAGING_ACCESS_TOKEN") || "";
+  if (!accessToken || !lineUserId) return false;
+  var transferInfo = String(order.bankTransferInfo || "").trim() || "請直接在 LINE 對話中向鼠購易確認匯款帳戶。";
+  var reportText = "您好，我要回報匯款\n訂單編號：" + order.orderNo + "\n匯款後五碼：";
+  var reportUrl = "https://line.me/R/oaMessage/%40527tnlnn/?" + encodeURIComponent(reportText);
+  var payload = {
+    to: lineUserId,
+    messages: [{
+      type: "flex",
+      altText: "訂單已成立｜" + order.orderNo + "｜應付訂金 NT$" + formatMoney_(order.depositTotal),
+      contents: {
+        type: "bubble",
+        styles: {
+          header: { backgroundColor: "#47748E" },
+          footer: { separator: true, separatorColor: "#E6DED5" }
+        },
+        header: {
+          type: "box", layout: "vertical", paddingAll: "18px",
+          contents: [
+            { type: "text", text: "預購訂單已成立", color: "#FFFFFF", weight: "bold", size: "xl" },
+            { type: "text", text: order.orderNo, color: "#DCECF3", size: "sm", margin: "sm" }
+          ]
+        },
+        body: {
+          type: "box", layout: "vertical", paddingAll: "18px", backgroundColor: "#FFFDF7",
+          contents: [
+            { type: "text", text: order.itemsSummary, wrap: true, size: "sm", color: "#304B59" },
+            { type: "separator", margin: "lg", color: "#E6DED5" },
+            moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
+            moneyRow_("商品預估總額", "NT$" + formatMoney_(order.estimatedTotal)),
+            moneyRow_("本次應付訂金", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
+            moneyRow_("回國後預估尾款", "NT$" + formatMoney_(order.estimatedBalance)),
+            { type: "separator", margin: "lg", color: "#E6DED5" },
+            { type: "text", text: "匯款帳戶", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
+            { type: "text", text: transferInfo, wrap: true, size: "sm", margin: "sm", color: "#304B59" },
+            { type: "text", text: "匯款完成後，請按下方按鈕人工回報。", wrap: true, size: "xs", margin: "md", color: "#75858D" }
+          ]
+        },
+        footer: {
+          type: "box", layout: "vertical", paddingAll: "14px",
+          contents: [{
+            type: "button", style: "primary", color: "#EF0025", height: "sm",
+            action: { type: "uri", label: "開啟 LINE 對話回報", uri: reportUrl }
+          }]
+        }
+      }
+    }]
+  };
+  try {
+    var response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + accessToken },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var code = response.getResponseCode();
+    if (code >= 200 && code < 300) return true;
+    console.error("LINE push failed: " + code + " " + response.getContentText());
+  } catch (error) {
+    console.error("LINE push failed: " + safeError_(error));
+  }
+  return false;
+}
+
+function moneyRow_(label, value, valueColor) {
+  return {
+    type: "box", layout: "horizontal", margin: "md",
+    contents: [
+      { type: "text", text: label, size: "sm", color: "#75858D", flex: 3 },
+      { type: "text", text: value, size: "sm", color: valueColor || "#304B59", weight: "bold", align: "end", flex: 2 }
+    ]
+  };
+}
+
+function formatMoney_(value) {
+  return Math.round(number_(value)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 function handleConfirmPreorderPayment_(data) {
@@ -219,7 +312,47 @@ function handleReadMyPreorders_(data) {
 function handleAdminReadProducts_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   setupQuokkaPreorder();
-  return json_({ ok: true, products: readProducts_(), settings: readSettings_() });
+  return json_({
+    ok: true,
+    products: readProducts_(),
+    settings: readSettings_(),
+    purchaseSummary: readPurchaseSummary_()
+  });
+}
+
+function readPurchaseSummary_() {
+  var sheet = spreadsheet_().getSheetByName("Preorders");
+  var lastRow = sheet ? sheet.getLastRow() : 0;
+  if (lastRow < 2) return { orderCount: 0, totalQty: 0, items: [] };
+  var rows = sheet.getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var orderCount = 0;
+  var totalQty = 0;
+  var grouped = {};
+  rows.forEach(function (row) {
+    if (!String(row[0] || "").trim()) return;
+    if (String(row[15] || "").trim() === "已取消") return;
+    orderCount += 1;
+    totalQty += number_(row[8]);
+    try {
+      var items = JSON.parse(row[6] || "[]");
+      if (!Array.isArray(items)) return;
+      items.forEach(function (item) {
+        var productId = String(item.productId || "").trim();
+        var name = String(item.name || "未命名商品").trim();
+        var variant = String(item.variant || "").trim();
+        var key = productId + "\n" + name + "\n" + variant;
+        if (!grouped[key]) grouped[key] = { name: name, variant: variant, qty: 0 };
+        grouped[key].qty += number_(item.qty);
+      });
+    } catch (error) {
+      console.warn("Invalid itemsJson in order " + String(row[0] || ""));
+    }
+  });
+  var items = Object.keys(grouped).map(function (key) { return grouped[key]; });
+  items.sort(function (a, b) {
+    return b.qty - a.qty || a.name.localeCompare(b.name) || a.variant.localeCompare(b.variant);
+  });
+  return { orderCount: orderCount, totalQty: totalQty, items: items };
 }
 
 function handleAdminSaveProduct_(data) {
