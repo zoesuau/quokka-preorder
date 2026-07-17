@@ -3,7 +3,7 @@ window.QUOKKA_CONFIG = {
   apiUrl: "https://script.google.com/macros/s/AKfycbzh7CqO-u_2gRWvlvUPzOAE7bAEQOczgmO18DZq7XbmEU2BzZQJetXn6MzzmsxiZbAF/exec",
   // LINE Developers 建立 LIFF App 後貼上 LIFF ID。前台與後台可共用同一個 LIFF。
   liffId: "2010743514-C2ckA5v9",
-  // 建議後台另建一個 Endpoint 指向 admin.html；留空時會沿用上方 LIFF ID。
+  // 後台預設使用管理登入碼；只有建立獨立後台 LIFF 時才填入。
   adminLiffId: "",
   brandName: "鼠購易｜韓國小物預購",
 };

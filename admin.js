@@ -17,7 +17,7 @@ async function initAdmin() {
       adminState.sessionToken = "";
     }
   }
-  if (!CONFIG.adminLiffId && !CONFIG.liffId) {
+  if (!CONFIG.adminLiffId) {
     showAdminLogin();
     return;
   }
@@ -90,7 +90,7 @@ async function loginWithAccessCode(event) {
 }
 
 async function initAdminLine() {
-  const adminLiffId = CONFIG.adminLiffId || CONFIG.liffId;
+  const adminLiffId = CONFIG.adminLiffId;
   if (!adminLiffId) throw new Error("LIFF_NOT_CONFIGURED");
   await liff.init({ liffId: adminLiffId });
   if (!liff.isLoggedIn()) {
