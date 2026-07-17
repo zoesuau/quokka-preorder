@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#3d332d" />
+    <title>鼠購易｜商品後台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="admin.css" />
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="config.js" defer></script>
+    <script src="admin.js" defer></script>
+  </head>
+  <body class="admin-page">
+    <header class="admin-header">
+      <div><p class="eyebrow">MOBILE ADMIN</p><h1>旅途商品後台</h1></div>
+      <button class="admin-refresh" type="button" id="refreshProducts">重新整理</button>
+    </header>
+
+    <main class="admin-main">
+      <section class="admin-intro">
+        <div><strong id="activeCount">0</strong><span>上架中</span></div>
+        <div><strong id="totalCount">0</strong><span>全部商品</span></div>
+        <button class="primary-button" type="button" id="newProduct">＋ 新增商品</button>
+      </section>
+
+      <details class="settings-card">
+        <summary>預購設定</summary>
+        <form id="settingsForm">
+          <div class="settings-grid">
+            <label class="field"><span>韓幣換算率</span><input id="exchangeRate" type="number" step="0.001" min="0.001" required /></label>
+            <label class="field"><span>每件訂金</span><input id="depositPerItem" type="number" step="1" min="0" required /></label>
+          </div>
+          <label class="field"><span>前台預購說明</span><textarea id="adminPreorderNotice" rows="3" maxlength="300"></textarea></label>
+          <label class="field"><span>訂金匯款資訊</span><textarea id="bankTransferInfoSetting" rows="2" maxlength="300" placeholder="銀行代碼、帳號與戶名"></textarea></label>
+          <label class="field"><span>iOPEN Mall 網址（可先留空）</span><input id="iopenMallUrl" type="url" maxlength="500" /></label>
+          <button class="secondary-button" type="submit">儲存預購設定</button>
+        </form>
+      </details>
+
+      <div class="admin-toolbar">
+        <label class="admin-search"><span>搜尋</span><input id="productSearch" type="search" placeholder="商品名稱或分類" /></label>
+        <select id="statusFilter" aria-label="上架狀態"><option value="all">全部狀態</option><option value="active">上架中</option><option value="inactive">已下架</option></select>
+      </div>
+
+      <div class="status-panel" id="adminStatus">正在確認管理員身分…</div>
+      <section class="admin-product-list" id="adminProductList"></section>
+    </main>
+
+    <dialog class="editor-dialog" id="productEditor">
+      <div class="checkout-header">
+        <div><p class="eyebrow">PRODUCT EDITOR</p><h2 id="editorTitle">新增商品</h2></div>
+        <form method="dialog"><button class="dialog-close" aria-label="關閉">×</button></form>
+      </div>
+      <form id="productForm">
+        <input id="productId" type="hidden" />
+        <label class="image-uploader" for="productImageInput">
+          <img id="productImagePreview" alt="商品預覽" />
+          <span id="imageUploadHint">拍照或從相簿選擇</span>
+          <input id="productImageInput" type="file" accept="image/jpeg,image/png,image/webp" />
+        </label>
+        <input id="productImageUrl" type="hidden" />
+        <div class="upload-progress" id="uploadProgress" hidden>正在壓縮並上傳圖片…</div>
+
+        <label class="field"><span>商品名稱 *</span><input id="productName" required maxlength="100" placeholder="例如：矮袋鼠露營鑰匙圈" /></label>
+        <div class="settings-grid">
+          <label class="field"><span>分類 *</span><input id="productCategory" required maxlength="30" list="categorySuggestions" placeholder="吊飾" /></label>
+          <label class="field"><span>韓幣售價 *</span><input id="productKrwPrice" required type="number" min="1" step="1" inputmode="numeric" /></label>
+        </div>
+        <datalist id="categorySuggestions"><option value="吊飾"></option><option value="文具"></option><option value="收納"></option><option value="玩偶"></option><option value="生活小物"></option></datalist>
+        <div class="price-preview">前台預估價格：<strong id="adminTwdPreview">NT$0</strong></div>
+        <label class="field"><span>款式（用逗號或換行分隔）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="QUOKKA, BOBO"></textarea></label>
+        <label class="field"><span>商品說明</span><textarea id="productDescription" rows="3" maxlength="500" placeholder="尺寸、材質或現場注意事項"></textarea></label>
+        <div class="settings-grid">
+          <label class="field"><span>排序</span><input id="productSortOrder" type="number" step="1" min="0" /></label>
+          <label class="switch-field"><span>立即上架</span><input id="productActive" type="checkbox" checked /><i></i></label>
+        </div>
+        <button class="primary-button" id="saveProduct" type="submit">儲存商品</button>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status"></div>
+  </body>
+</html>

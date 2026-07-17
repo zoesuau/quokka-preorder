@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#f8eee3" />
+    <title>鼠購易｜韓國小物預購</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="config.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">KOREA PRE-ORDER</p>
+        <h1 id="brandName">鼠購易</h1>
+      </div>
+      <button class="header-link" type="button" id="myOrdersButton">我的預購</button>
+    </header>
+
+    <main>
+      <section class="hero">
+        <span class="hero-sticker">QUOKKA PICK</span>
+        <h2>把韓國遇見的<br />可愛一起袋回家</h2>
+        <p>旅途中即時上架・每件訂金 NT$50・回國後至 iOPEN Mall 補尾款取貨</p>
+      </section>
+
+      <section class="notice-card" aria-label="預購說明">
+        <strong>預購方式</strong>
+        <p id="preorderNotice">商品下訂後才會採購。若韓國現場缺貨，該商品訂金將全額退回。</p>
+      </section>
+
+      <section class="catalog-section" id="catalogView">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">TODAY'S PICKS</p>
+            <h2>本次代購商品</h2>
+          </div>
+          <span id="productCount">讀取中</span>
+        </div>
+        <div class="category-chips" id="categoryChips" aria-label="商品分類"></div>
+        <div class="status-panel" id="catalogStatus">正在整理今天的可愛小物…</div>
+        <div class="product-grid" id="productGrid"></div>
+      </section>
+
+      <section class="orders-view" id="ordersView" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">MY PRE-ORDERS</p>
+            <h2>我的預購</h2>
+          </div>
+          <button class="text-button" type="button" id="backToCatalog">繼續選購</button>
+        </div>
+        <div class="status-panel" id="ordersStatus">正在讀取…</div>
+        <div class="order-list" id="orderList"></div>
+      </section>
+    </main>
+
+    <div class="cart-dock" id="cartDock" hidden>
+      <button type="button" id="openCheckout">
+        <span><b id="cartQty">0</b> 件商品</span>
+        <span>訂金 <b id="cartDeposit">NT$0</b>　查看明細 →</span>
+      </button>
+    </div>
+
+    <dialog class="product-dialog" id="productDialog">
+      <form method="dialog">
+        <button class="dialog-close" aria-label="關閉">×</button>
+      </form>
+      <img id="dialogImage" alt="" />
+      <div class="dialog-body">
+        <span class="category-label" id="dialogCategory"></span>
+        <h2 id="dialogName"></h2>
+        <p class="krw-price" id="dialogKrw"></p>
+        <p class="twd-price" id="dialogTwd"></p>
+        <p class="product-description" id="dialogDescription"></p>
+        <label class="field" id="variantField">
+          <span>款式</span>
+          <select id="dialogVariant"></select>
+        </label>
+        <label class="field">
+          <span>數量</span>
+          <select id="dialogQty">
+            <option value="1">1 件</option><option value="2">2 件</option>
+            <option value="3">3 件</option><option value="4">4 件</option>
+            <option value="5">5 件</option><option value="6">6 件</option>
+          </select>
+        </label>
+        <button class="primary-button" type="button" id="addToCart">加入預購</button>
+      </div>
+    </dialog>
+
+    <dialog class="checkout-dialog" id="checkoutDialog">
+      <div class="checkout-header">
+        <div><p class="eyebrow">CHECKOUT</p><h2>確認預購</h2></div>
+        <form method="dialog"><button class="dialog-close" aria-label="關閉">×</button></form>
+      </div>
+      <form id="orderForm">
+        <div class="checkout-items" id="checkoutItems"></div>
+        <div class="money-card">
+          <div><span>商品預估總額</span><strong id="estimatedTotal">NT$0</strong></div>
+          <div class="deposit-row"><span>本次應付訂金</span><strong id="depositTotal">NT$0</strong></div>
+          <div><span>回國後預估尾款</span><strong id="balanceTotal">NT$0</strong></div>
+          <small>尾款尚不含 iOPEN Mall 運費；實際尾款以回國通知為準。</small>
+        </div>
+
+        <h3 class="form-title">聯絡資料</h3>
+        <label class="field"><span>訂購人姓名 *</span><input id="customerName" required maxlength="30" autocomplete="name" /></label>
+        <label class="field"><span>手機號碼 *</span><input id="phone" required maxlength="20" inputmode="tel" autocomplete="tel" /></label>
+        <div class="transfer-info"><strong>訂金匯款資訊</strong><p id="bankTransferInfo">請依賣家提供的帳號完成訂金匯款。</p></div>
+        <label class="field"><span>匯款後五碼 *</span><input id="transferLast5" required maxlength="5" minlength="5" inputmode="numeric" pattern="[0-9]{5}" placeholder="請先完成訂金匯款" /></label>
+        <label class="field"><span>備註</span><textarea id="note" maxlength="300" rows="3" placeholder="其他想告訴我們的事"></textarea></label>
+
+        <label class="agreement">
+          <input type="checkbox" id="agreement" required />
+          <span>我了解這是預購商品；採購成功後取消訂單，訂金不予退還。若韓國現場缺貨，該商品訂金將退回。</span>
+        </label>
+        <button class="primary-button submit-button" id="submitOrder" type="submit">送出預購並登記訂金</button>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+  </body>
+</html>
