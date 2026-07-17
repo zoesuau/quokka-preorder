@@ -206,6 +206,7 @@ async function submitOrder(event) {
       lineDisplayName: state.line.displayName,
       customerName: document.getElementById("customerName").value.trim(),
       phone: document.getElementById("phone").value.trim(),
+      socialProfileId: document.getElementById("socialProfileId").value.trim(),
       note: document.getElementById("note").value.trim(),
       items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, qty: item.qty })),
     };

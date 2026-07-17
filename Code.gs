@@ -17,7 +17,7 @@ var ORDER_HEADERS_ = [
   "orderNo", "createdAt", "lineUserId", "lineDisplayName", "customerName",
   "phone", "itemsJson", "itemsSummary", "totalQty", "estimatedTotal",
   "depositTotal", "estimatedBalance", "paymentMethod", "transferLast5",
-  "note", "status"
+  "note", "status", "socialProfileId", "shippingStatus", "shippedAt"
 ];
 
 var SETTING_HEADERS_ = ["key", "value", "label"];
@@ -26,6 +26,11 @@ var DEFAULT_SETTINGS_ = {
   depositPerItem: 50,
   preorderNotice: "商品下訂後才會採購。若韓國現場缺貨，該商品訂金將全額退回。",
   bankTransferInfo: "",
+  bankName: "",
+  bankCode: "",
+  bankAccount: "",
+  bankAccountName: "",
+  bankQrUrl: "",
   iopenMallUrl: ""
 };
 var PRODUCT_IMAGE_FOLDER_ = "quokka-preorder-product-images";
@@ -46,6 +51,7 @@ function doPost(e) {
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
     if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
+    if (action === "adminToggleOrderShipping") return handleAdminToggleOrderShipping_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
     if (action === "adminUploadProductImage") return handleAdminUploadProductImage_(data);
@@ -155,7 +161,10 @@ function handleCreatePreorder_(data) {
       "",
       "",
       cleanText_(data.note, 300),
-      "待人工確認"
+      "待人工確認",
+      cleanText_(data.socialProfileId, 100),
+      "未出貨",
+      ""
     ]);
     orderResult = {
       orderNo: orderNo,
@@ -164,7 +173,8 @@ function handleCreatePreorder_(data) {
       estimatedTotal: estimatedTotal,
       depositTotal: depositTotal,
       estimatedBalance: estimatedBalance,
-      bankTransferInfo: settings.bankTransferInfo
+      bankTransferInfo: composeBankTransferInfo_(settings),
+      bankQrUrl: settings.bankQrUrl
     };
   } finally {
     lock.releaseLock();
@@ -209,6 +219,21 @@ function buildOrderSuccessMessage_(order) {
   var transferInfo = String(order.bankTransferInfo || "").trim() || "請直接在 LINE 對話中向鼠購易確認匯款帳戶。";
   var reportText = "您好，我要回報匯款\n訂單編號：" + order.orderNo + "\n匯款後五碼：";
   var reportUrl = "https://line.me/R/oaMessage/%40527tnlnn/?" + encodeURIComponent(reportText);
+  var bodyContents = [
+    { type: "text", text: order.itemsSummary, wrap: true, size: "sm", color: "#304B59" },
+    { type: "separator", margin: "lg", color: "#E6DED5" },
+    moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
+    moneyRow_("商品預估總額", "NT$" + formatMoney_(order.estimatedTotal)),
+    moneyRow_("本次應付訂金", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
+    moneyRow_("回國後預估尾款", "NT$" + formatMoney_(order.estimatedBalance)),
+    { type: "separator", margin: "lg", color: "#E6DED5" },
+    { type: "text", text: "匯款帳戶", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
+    { type: "text", text: transferInfo, wrap: true, size: "sm", margin: "sm", color: "#304B59" }
+  ];
+  if (/^https:\/\//i.test(String(order.bankQrUrl || ""))) {
+    bodyContents.push({ type: "image", url: order.bankQrUrl, size: "full", aspectMode: "fit", aspectRatio: "1:1", margin: "lg" });
+  }
+  bodyContents.push({ type: "text", text: "匯款完成後，請按下方按鈕人工回報。", wrap: true, size: "xs", margin: "md", color: "#75858D" });
   return {
       type: "flex",
       altText: "訂單已成立｜" + order.orderNo + "｜應付訂金 NT$" + formatMoney_(order.depositTotal),
@@ -227,18 +252,7 @@ function buildOrderSuccessMessage_(order) {
         },
         body: {
           type: "box", layout: "vertical", paddingAll: "18px", backgroundColor: "#FFFDF7",
-          contents: [
-            { type: "text", text: order.itemsSummary, wrap: true, size: "sm", color: "#304B59" },
-            { type: "separator", margin: "lg", color: "#E6DED5" },
-            moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
-            moneyRow_("商品預估總額", "NT$" + formatMoney_(order.estimatedTotal)),
-            moneyRow_("本次應付訂金", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
-            moneyRow_("回國後預估尾款", "NT$" + formatMoney_(order.estimatedBalance)),
-            { type: "separator", margin: "lg", color: "#E6DED5" },
-            { type: "text", text: "匯款帳戶", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
-            { type: "text", text: transferInfo, wrap: true, size: "sm", margin: "sm", color: "#304B59" },
-            { type: "text", text: "匯款完成後，請按下方按鈕人工回報。", wrap: true, size: "xs", margin: "md", color: "#75858D" }
-          ]
+          contents: bodyContents
         },
         footer: {
           type: "box", layout: "vertical", paddingAll: "14px",
@@ -320,9 +334,55 @@ function handleAdminReadProducts_(data) {
   return json_({
     ok: true,
     products: readProducts_(),
+    orders: readAdminOrders_(),
     settings: readSettings_(),
     purchaseSummary: readPurchaseSummary_()
   });
+}
+
+function readAdminOrders_() {
+  var sheet = spreadsheet_().getSheetByName("Preorders");
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length).getDisplayValues();
+  return rows.filter(function (row) { return String(row[0] || "").trim(); }).map(function (row) {
+    var items = [];
+    try { items = JSON.parse(row[6] || "[]"); } catch (error) { items = []; }
+    return {
+      orderNo: row[0], createdAt: row[1], lineDisplayName: row[3], customerName: row[4],
+      phone: row[5], items: Array.isArray(items) ? items : [], itemsSummary: row[7],
+      totalQty: number_(row[8]), estimatedTotal: number_(row[9]), depositTotal: number_(row[10]),
+      estimatedBalance: number_(row[11]), paymentMethod: row[12], transferLast5: row[13],
+      note: row[14], status: row[15], socialProfileId: row[16],
+      shippingStatus: String(row[17] || "").trim() === "已出貨" ? "已出貨" : "未出貨",
+      shippedAt: row[18]
+    };
+  }).reverse().slice(0, 300);
+}
+
+function handleAdminToggleOrderShipping_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  if (!orderNo || typeof data.shipped !== "boolean") throw new Error("INVALID_ORDER_STATUS");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) throw new Error("ORDER_NOT_FOUND");
+    var orderNos = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+    for (var index = 0; index < orderNos.length; index++) {
+      if (String(orderNos[index][0] || "").trim() !== orderNo) continue;
+      var rowNumber = index + 2;
+      var shippingStatus = data.shipped ? "已出貨" : "未出貨";
+      var shippedAt = data.shipped ? formatDateTime_(new Date()) : "";
+      sheet.getRange(rowNumber, 18, 1, 2).setValues([[shippingStatus, shippedAt]]);
+      return json_({ ok: true, order: { orderNo: orderNo, shippingStatus: shippingStatus, shippedAt: shippedAt } });
+    }
+    throw new Error("ORDER_NOT_FOUND");
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function readPurchaseSummary_() {
@@ -435,10 +495,16 @@ function handleAdminSaveSettings_(data) {
     depositPerItem: Number(source.depositPerItem),
     preorderNotice: cleanText_(source.preorderNotice, 300),
     bankTransferInfo: cleanText_(source.bankTransferInfo, 300),
+    bankName: cleanText_(source.bankName, 50),
+    bankCode: cleanText_(source.bankCode, 10),
+    bankAccount: cleanText_(source.bankAccount, 30),
+    bankAccountName: cleanText_(source.bankAccountName, 50),
+    bankQrUrl: cleanText_(source.bankQrUrl, 500),
     iopenMallUrl: cleanText_(source.iopenMallUrl, 500)
   };
   if (!Number.isFinite(settings.exchangeRate) || settings.exchangeRate <= 0 || settings.exchangeRate > 1) throw new Error("INVALID_SETTINGS");
   if (!Number.isInteger(settings.depositPerItem) || settings.depositPerItem < 0 || settings.depositPerItem > 10000) throw new Error("INVALID_SETTINGS");
+  if (settings.bankQrUrl && !/^https:\/\//i.test(settings.bankQrUrl)) throw new Error("INVALID_SETTINGS");
   if (settings.iopenMallUrl && !/^https:\/\//i.test(settings.iopenMallUrl)) throw new Error("INVALID_SETTINGS");
 
   var lock = LockService.getScriptLock();
@@ -451,6 +517,11 @@ function handleAdminSaveSettings_(data) {
       ["depositPerItem", settings.depositPerItem, "每件訂金"],
       ["preorderNotice", settings.preorderNotice, "前台預購說明"],
       ["bankTransferInfo", settings.bankTransferInfo, "訂金匯款資訊"],
+      ["bankName", settings.bankName, "銀行名稱"],
+      ["bankCode", settings.bankCode, "銀行代碼"],
+      ["bankAccount", settings.bankAccount, "匯款帳號"],
+      ["bankAccountName", settings.bankAccountName, "匯款戶名"],
+      ["bankQrUrl", settings.bankQrUrl, "匯款 QR Code"],
       ["iopenMallUrl", settings.iopenMallUrl, "iOPEN Mall 網址"]
     ];
     if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, SETTING_HEADERS_.length).clearContent();
@@ -525,9 +596,23 @@ function readSettings_() {
     if (key === "depositPerItem") settings.depositPerItem = number_(row[1]);
     if (key === "preorderNotice") settings.preorderNotice = String(row[1] || "").trim();
     if (key === "bankTransferInfo") settings.bankTransferInfo = String(row[1] || "").trim();
+    if (key === "bankName") settings.bankName = String(row[1] || "").trim();
+    if (key === "bankCode") settings.bankCode = String(row[1] || "").trim();
+    if (key === "bankAccount") settings.bankAccount = String(row[1] || "").trim();
+    if (key === "bankAccountName") settings.bankAccountName = String(row[1] || "").trim();
+    if (key === "bankQrUrl") settings.bankQrUrl = String(row[1] || "").trim();
     if (key === "iopenMallUrl") settings.iopenMallUrl = String(row[1] || "").trim();
   });
   return settings;
+}
+
+function composeBankTransferInfo_(settings) {
+  var lines = [];
+  if (settings.bankName || settings.bankCode) lines.push((settings.bankName || "銀行") + (settings.bankCode ? "（" + settings.bankCode + "）" : ""));
+  if (settings.bankAccount) lines.push("帳號：" + settings.bankAccount);
+  if (settings.bankAccountName) lines.push("戶名：" + settings.bankAccountName);
+  if (settings.bankTransferInfo) lines.push(settings.bankTransferInfo);
+  return lines.join("\n");
 }
 
 function requireAdmin_(idToken, adminSessionToken) {
@@ -577,7 +662,10 @@ function ensureSheet_(ss, name, headers) {
   if (!sheet) sheet = ss.insertSheet(name);
   if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   var actual = sheet.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
-  headers.forEach(function (header, index) { if (actual[index] !== header) throw new Error(name.toUpperCase() + "_HEADER_MISMATCH"); });
+  headers.forEach(function (header, index) {
+    if (!actual[index]) sheet.getRange(1, index + 1).setValue(header);
+    else if (actual[index] !== header) throw new Error(name.toUpperCase() + "_HEADER_MISMATCH");
+  });
   sheet.setFrozenRows(1);
   return sheet;
 }
@@ -585,11 +673,16 @@ function ensureSheet_(ss, name, headers) {
 function ensureSettingsSheet_(ss) {
   var sheet = ensureSheet_(ss, "Settings", SETTING_HEADERS_);
   if (sheet.getLastRow() < 2) {
-    sheet.getRange(2, 1, 5, 3).setValues([
+    sheet.getRange(2, 1, 10, 3).setValues([
       ["exchangeRate", DEFAULT_SETTINGS_.exchangeRate, "韓幣換算率"],
       ["depositPerItem", DEFAULT_SETTINGS_.depositPerItem, "每件訂金"],
       ["preorderNotice", DEFAULT_SETTINGS_.preorderNotice, "前台預購說明"],
       ["bankTransferInfo", "", "訂金匯款資訊"],
+      ["bankName", "", "銀行名稱"],
+      ["bankCode", "", "銀行代碼"],
+      ["bankAccount", "", "匯款帳號"],
+      ["bankAccountName", "", "匯款戶名"],
+      ["bankQrUrl", "", "匯款 QR Code"],
       ["iopenMallUrl", "", "iOPEN Mall 網址"]
     ]);
   }
@@ -628,7 +721,7 @@ function safeError_(error) {
   var allowed = [
     "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "ADMIN_ACCESS_CODE_MISSING", "ADMIN_LOGIN_FAILED", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
     "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
-    "ORDER_NOT_FOUND", "ORDER_FORBIDDEN",
+    "ORDER_NOT_FOUND", "ORDER_FORBIDDEN", "INVALID_ORDER_STATUS",
     "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
     "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING"
   ];

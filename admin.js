@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-const adminState = { products: [], settings: { exchangeRate: .022, depositPerItem: 50 }, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false };
+const adminState = { products: [], orders: [], settings: { exchangeRate: .022, depositPerItem: 50 }, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
@@ -41,6 +41,10 @@ function bindAdminEvents() {
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
+  document.getElementById("adminOrderList").addEventListener("click", handleOrderAction);
+  document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
+  document.getElementById("shippingFilter").addEventListener("change", renderAdminOrders);
+  document.getElementById("bankQrInput").addEventListener("change", uploadBankQr);
 }
 
 function showAdminLogin(message = "") {
@@ -107,10 +111,12 @@ async function loadAdminProducts() {
   const result = await adminPost({ action: "adminReadProducts" });
   if (!result.ok) throw new Error(result.error || "READ_FAILED");
   adminState.products = result.products || [];
+  adminState.orders = result.orders || [];
   adminState.settings = { ...adminState.settings, ...(result.settings || {}) };
   adminState.purchaseSummary = result.purchaseSummary || { orderCount: 0, totalQty: 0, items: [] };
   fillSettings();
   renderPurchaseSummary();
+  renderAdminOrders();
   renderAdminProducts();
 }
 
@@ -121,6 +127,55 @@ function renderPurchaseSummary() {
   document.getElementById("purchaseItemList").innerHTML = summary.items?.length
     ? summary.items.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}</span><b>× ${formatNumber(item.qty)}</b></div>`).join("")
     : `<p>目前還沒有訂單。</p>`;
+}
+
+function renderAdminOrders() {
+  const search = document.getElementById("orderSearch").value.trim().toLowerCase();
+  const filter = document.getElementById("shippingFilter").value;
+  const unshipped = adminState.orders.filter((order) => order.shippingStatus !== "已出貨").length;
+  document.getElementById("unshippedCount").textContent = `${formatNumber(unshipped)} 筆未出貨`;
+  const orders = adminState.orders.filter((order) => {
+    const shipped = order.shippingStatus === "已出貨";
+    if (filter === "unshipped" && shipped) return false;
+    if (filter === "shipped" && !shipped) return false;
+    const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName} ${order.socialProfileId}`.toLowerCase();
+    return !search || haystack.includes(search);
+  });
+  document.getElementById("adminOrderList").innerHTML = orders.length ? orders.map(renderAdminOrderCard).join("") : `<div class="empty-orders">沒有符合條件的訂單。</div>`;
+}
+
+function renderAdminOrderCard(order) {
+  const shipped = order.shippingStatus === "已出貨";
+  const items = Array.isArray(order.items) ? order.items : [];
+  return `<article class="admin-order-card ${shipped ? "shipped" : "unshipped"}">
+    <header><div><span>${shipped ? "已出貨" : "未出貨"}</span><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><b>${formatNumber(order.totalQty)} 件</b></header>
+    <div class="packing-items">${items.map((item) => `<div><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<b>× ${formatNumber(item.qty)}</b></div>`).join("") || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
+    <dl class="customer-details">
+      <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
+      <div><dt>LINE</dt><dd>${escapeHtml(order.lineDisplayName || "—")}</dd></div>
+      <div><dt>社群 ID</dt><dd>${escapeHtml(order.socialProfileId || "未填寫")}</dd></div>
+      <div><dt>金額</dt><dd>總額 NT$${formatNumber(order.estimatedTotal)}／訂金 NT$${formatNumber(order.depositTotal)}／尾款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
+      <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
+      ${shipped && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
+    </dl>
+    <button class="shipping-action" type="button" data-shipping-order="${escapeAttr(order.orderNo)}" data-shipped="${shipped ? "true" : "false"}">${shipped ? "改回未出貨" : "標記已出貨"}</button>
+  </article>`;
+}
+
+async function handleOrderAction(event) {
+  const button = event.target.closest("[data-shipping-order]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await adminPost({ action: "adminToggleOrderShipping", orderNo: button.dataset.shippingOrder, shipped: button.dataset.shipped !== "true" });
+    if (!result.ok) throw new Error(result.error || "SHIPPING_UPDATE_FAILED");
+    const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
+    if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
+    renderAdminOrders();
+    showToast(result.order.shippingStatus === "已出貨" ? "已標記出貨" : "已改回未出貨");
+  } catch (error) {
+    showToast("出貨狀態更新失敗");
+  } finally { button.disabled = false; }
 }
 
 function renderAdminProducts() {
@@ -245,17 +300,30 @@ function fillSettings() {
   document.getElementById("depositPerItem").value = adminState.settings.depositPerItem ?? 50;
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
   document.getElementById("bankTransferInfoSetting").value = adminState.settings.bankTransferInfo || "";
+  document.getElementById("bankName").value = adminState.settings.bankName || "";
+  document.getElementById("bankCode").value = adminState.settings.bankCode || "";
+  document.getElementById("bankAccount").value = adminState.settings.bankAccount || "";
+  document.getElementById("bankAccountName").value = adminState.settings.bankAccountName || "";
+  document.getElementById("bankQrUrl").value = adminState.settings.bankQrUrl || "";
+  document.getElementById("bankQrPreview").src = adminState.settings.bankQrUrl || demoPlaceholder;
+  document.getElementById("bankQrHint").textContent = adminState.settings.bankQrUrl ? "點一下更換 QR Code" : "上傳匯款 QR Code（選填）";
   document.getElementById("iopenMallUrl").value = adminState.settings.iopenMallUrl || "";
   updateAdminPricePreview();
 }
 
 async function saveSettings(event) {
   event.preventDefault();
+  if (adminState.bankUploadBusy) return showToast("請等 QR Code 上傳完成");
   const settings = {
     exchangeRate: Number(document.getElementById("exchangeRate").value),
     depositPerItem: Number(document.getElementById("depositPerItem").value),
     preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
     bankTransferInfo: document.getElementById("bankTransferInfoSetting").value.trim(),
+    bankName: document.getElementById("bankName").value.trim(),
+    bankCode: document.getElementById("bankCode").value.trim(),
+    bankAccount: document.getElementById("bankAccount").value.trim(),
+    bankAccountName: document.getElementById("bankAccountName").value.trim(),
+    bankQrUrl: document.getElementById("bankQrUrl").value.trim(),
     iopenMallUrl: document.getElementById("iopenMallUrl").value.trim(),
   };
   try {
@@ -265,6 +333,29 @@ async function saveSettings(event) {
     updateAdminPricePreview();
     showToast("預購設定已儲存");
   } catch (error) { showToast("設定儲存失敗"); }
+}
+
+async function uploadBankQr(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  adminState.bankUploadBusy = true;
+  document.getElementById("bankQrProgress").hidden = false;
+  try {
+    const compressed = await compressImage(file, 1600, .92);
+    document.getElementById("bankQrPreview").src = compressed.dataUrl;
+    const result = await adminPost({ action: "adminUploadProductImage", fileName: `bank-qr-${file.name}`, mimeType: "image/jpeg", base64Data: compressed.dataUrl.split(",")[1] });
+    if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
+    document.getElementById("bankQrUrl").value = result.imageUrl;
+    document.getElementById("bankQrPreview").src = result.imageUrl;
+    document.getElementById("bankQrHint").textContent = "點一下更換 QR Code";
+    showToast("QR Code 上傳完成，記得儲存設定");
+  } catch (error) {
+    showToast("QR Code 上傳失敗，請換一張再試");
+  } finally {
+    adminState.bankUploadBusy = false;
+    document.getElementById("bankQrProgress").hidden = true;
+    event.target.value = "";
+  }
 }
 
 function updateAdminPricePreview() {
