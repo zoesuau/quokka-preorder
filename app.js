@@ -1,7 +1,7 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
 const state = {
   products: [],
-  settings: { exchangeRate: 0.022, depositPerItem: 50, preorderNotice: "", bankTransferInfo: "" },
+  settings: { exchangeRate: 0.022, depositPerItem: 50, preorderNotice: "", bankTransferInfo: "", socialIdRequired: false },
   category: "全部",
   cart: [],
   selectedProduct: null,
@@ -68,7 +68,15 @@ async function loadCatalog() {
   if (!response.ok || !data.ok || !Array.isArray(data.products)) throw new Error(data.error || "CATALOG_LOAD_FAILED");
   state.products = data.products.filter((product) => product.active);
   state.settings = { ...state.settings, ...(data.settings || {}) };
+  applySocialIdRequirement();
   renderCatalog();
+}
+
+function applySocialIdRequirement() {
+  const required = state.settings.socialIdRequired === true;
+  const input = document.getElementById("socialProfileId");
+  input.required = required;
+  input.closest("label").querySelector("span").textContent = required ? "LINE 社群 ID *" : "LINE 社群 ID（選填）";
 }
 
 function useDemoCatalog() {
@@ -90,14 +98,14 @@ function renderCatalog() {
 
   const visible = state.category === "全部" ? state.products : state.products.filter((product) => product.category === state.category);
   document.getElementById("productCount").textContent = `${visible.length} 件商品`;
-  document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。若韓國現場缺貨，該商品訂金將全額退回。";
+  document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。代購費為商品費用外加；若韓國現場缺貨，該商品代購費將全額退回。";
   const grid = document.getElementById("productGrid");
   grid.innerHTML = visible.map((product) => {
     const twd = toTwd(product.krwPrice);
     return `<article class="product-card" role="button" tabindex="0" aria-label="查看 ${escapeAttr(product.name)}" data-product-id="${escapeAttr(product.id)}">
       ${productImage(product)}
       <div class="product-card-body"><span class="category-label">${escapeHtml(product.category || "韓國小物")}</span>
-      <h3>${escapeHtml(product.name)}</h3><p class="price">NT$${formatNumber(twd)}</p><small>₩${formatNumber(product.krwPrice)}・訂金 NT$${formatNumber(state.settings.depositPerItem)}/件</small></div>
+      <h3>${escapeHtml(product.name)}</h3><p class="price">NT$${formatNumber(twd)}</p><small>₩${formatNumber(product.krwPrice)}・代購費 NT$${formatNumber(state.settings.depositPerItem)}/件</small></div>
     </article>`;
   }).join("");
   grid.querySelectorAll(".product-card").forEach((card) => {
@@ -170,7 +178,7 @@ function getTotals() {
     estimatedTotal += toTwd(product.krwPrice) * item.qty;
   });
   const depositTotal = qty * state.settings.depositPerItem;
-  return { qty, estimatedTotal, depositTotal, balanceTotal: Math.max(0, estimatedTotal - depositTotal) };
+  return { qty, estimatedTotal, depositTotal, balanceTotal: estimatedTotal };
 }
 
 function openCheckout() {
@@ -227,6 +235,7 @@ async function submitOrder(event) {
       LINE_LOGIN_REQUIRED: "請從 LINE 開啟此頁並完成登入",
       LINE_CONFIG_MISSING: "LINE 登入設定尚未完成，請聯絡管理員",
       INVALID_CUSTOMER: "請確認姓名與手機號碼皆已正確填寫",
+      SOCIAL_ID_REQUIRED: "請填寫 LINE 社群 ID",
       INVALID_ITEMS: "購物車內容有誤，請重新選擇商品",
       SPREADSHEET_CONFIG_MISSING: "訂單系統尚未連接試算表，請聯絡管理員",
       SERVER_ERROR: "訂單系統暫時發生錯誤，請聯絡管理員",
@@ -269,7 +278,7 @@ function showCatalog() {
 }
 
 function renderOrder(order) {
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待人工確認")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>應付訂金</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>預估尾款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待人工確認")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>代購費</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>回國後商品款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
 }
 
 async function apiPost(payload) {

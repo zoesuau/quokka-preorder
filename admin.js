@@ -169,7 +169,7 @@ function renderAdminOrderCard(order) {
       <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
       <div><dt>LINE</dt><dd>${escapeHtml(order.lineDisplayName || "—")}</dd></div>
       <div><dt>LINE 社群 ID</dt><dd>${escapeHtml(order.socialProfileId || "未填寫")}</dd></div>
-      <div><dt>金額</dt><dd>總額 NT$${formatNumber(order.estimatedTotal)}／訂金 NT$${formatNumber(order.depositTotal)}／尾款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
+      <div><dt>金額</dt><dd>商品款 NT$${formatNumber(order.estimatedTotal)}／代購費 NT$${formatNumber(order.depositTotal)}／回國後商品款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
       <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
       ${shipped && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
     </dl>
@@ -313,6 +313,7 @@ async function saveProduct(event) {
 function fillSettings() {
   document.getElementById("exchangeRate").value = adminState.settings.exchangeRate || .022;
   document.getElementById("depositPerItem").value = adminState.settings.depositPerItem ?? 50;
+  document.getElementById("socialIdRequired").checked = adminState.settings.socialIdRequired === true;
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
   document.getElementById("bankTransferInfoSetting").value = adminState.settings.bankTransferInfo || "";
   document.getElementById("bankName").value = adminState.settings.bankName || "";
@@ -332,6 +333,7 @@ async function saveSettings(event) {
   const settings = {
     exchangeRate: Number(document.getElementById("exchangeRate").value),
     depositPerItem: Number(document.getElementById("depositPerItem").value),
+    socialIdRequired: document.getElementById("socialIdRequired").checked,
     preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
     bankTransferInfo: document.getElementById("bankTransferInfoSetting").value.trim(),
     bankName: document.getElementById("bankName").value.trim(),
