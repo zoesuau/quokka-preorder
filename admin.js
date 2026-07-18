@@ -168,7 +168,7 @@ function renderAdminOrderCard(order) {
     <dl class="customer-details">
       <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
       <div><dt>LINE</dt><dd>${escapeHtml(order.lineDisplayName || "—")}</dd></div>
-      <div><dt>社群 ID</dt><dd>${escapeHtml(order.socialProfileId || "未填寫")}</dd></div>
+      <div><dt>LINE 社群 ID</dt><dd>${escapeHtml(order.socialProfileId || "未填寫")}</dd></div>
       <div><dt>金額</dt><dd>總額 NT$${formatNumber(order.estimatedTotal)}／訂金 NT$${formatNumber(order.depositTotal)}／尾款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
       <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
       ${shipped && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}

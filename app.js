@@ -195,7 +195,6 @@ async function submitOrder(event) {
   event.preventDefault();
   if (!CONFIG.apiUrl) return showToast("尚未設定 GAS API，現在是版面預覽模式");
   if (!state.line.idToken) return showToast("請從 LINE 開啟此頁並完成登入");
-  if (!await ensureOfficialAccountFriend()) return showToast("請先加入鼠購易官方帳號，才能送出訂單");
   const button = document.getElementById("submitOrder");
   button.disabled = true;
   button.textContent = "正在送出預購…";
@@ -222,23 +221,20 @@ async function submitOrder(event) {
     await showMyOrders();
   } catch (error) {
     console.error(error);
-    showToast(error.message === "PRODUCT_CHANGED" ? "商品資訊已更新，請重新整理後再送出" : "送出失敗，請稍後再試");
+    const messages = {
+      PRODUCT_CHANGED: "商品資訊已更新，請重新整理後再送出",
+      LINE_TOKEN_INVALID: "LINE 登入已過期，請關閉頁面後從 LINE 重新開啟",
+      LINE_LOGIN_REQUIRED: "請從 LINE 開啟此頁並完成登入",
+      LINE_CONFIG_MISSING: "LINE 登入設定尚未完成，請聯絡管理員",
+      INVALID_CUSTOMER: "請確認姓名與手機號碼皆已正確填寫",
+      INVALID_ITEMS: "購物車內容有誤，請重新選擇商品",
+      SPREADSHEET_CONFIG_MISSING: "訂單系統尚未連接試算表，請聯絡管理員",
+      SERVER_ERROR: "訂單系統暫時發生錯誤，請聯絡管理員",
+    };
+    showToast(messages[error.message] || `送出失敗（${error.message || "網路連線異常"}）`);
   } finally {
     button.disabled = false;
     button.textContent = "先送出預購訂單";
-  }
-}
-
-async function ensureOfficialAccountFriend() {
-  try {
-    let friendship = await liff.getFriendship();
-    if (friendship.friendFlag) return true;
-    if (typeof liff.requestFriendship === "function") await liff.requestFriendship();
-    friendship = await liff.getFriendship();
-    return Boolean(friendship.friendFlag);
-  } catch (error) {
-    console.warn("OA friendship check failed", error);
-    return false;
   }
 }
 
