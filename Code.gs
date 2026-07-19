@@ -599,6 +599,9 @@ function readSettings_() {
     if (key === "bankQrUrl") settings.bankQrUrl = String(row[1] || "").trim();
     if (key === "iopenMallUrl") settings.iopenMallUrl = String(row[1] || "").trim();
   });
+  if (settings.preorderNotice === "商品下訂後才會採購。代購費為商品費用外加；若韓國現場缺貨，該商品代購費將全額退回。") {
+    settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
+  }
   return settings;
 }
 
