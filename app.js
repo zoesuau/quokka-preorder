@@ -1,7 +1,7 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
 const state = {
   products: [],
-  settings: { exchangeRate: 0.022, preorderNotice: "", bankTransferInfo: "" },
+  settings: { preorderNotice: "", bankTransferInfo: "" },
   category: "全部",
   cart: [],
   selectedProduct: null,
@@ -9,8 +9,8 @@ const state = {
 };
 
 const demoProducts = [
-  { id: "demo-1", name: "矮袋鼠造型鑰匙圈", category: "吊飾", imageUrl: "", krwPrice: 15000, variants: ["QUOKKA", "BOBO"], description: "韓國現場預購示意商品", active: true, sortOrder: 1 },
-  { id: "demo-2", name: "矮袋鼠便利貼組", category: "文具", imageUrl: "", krwPrice: 8500, variants: [], description: "韓國現場預購示意商品", active: true, sortOrder: 2 },
+  { id: "demo-1", name: "矮袋鼠造型鑰匙圈", category: "吊飾", imageUrl: "", priceTwd: 330, variants: ["QUOKKA", "BOBO"], description: "韓國現場預購示意商品", active: true, sortOrder: 1 },
+  { id: "demo-2", name: "矮袋鼠便利貼組", category: "文具", imageUrl: "", priceTwd: 190, variants: [], description: "韓國現場預購示意商品", active: true, sortOrder: 2 },
 ];
 
 document.addEventListener("DOMContentLoaded", init);
@@ -90,14 +90,13 @@ function renderCatalog() {
 
   const visible = state.category === "全部" ? state.products : state.products.filter((product) => product.category === state.category);
   document.getElementById("productCount").textContent = `${visible.length} 件商品`;
-  document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。";
+  document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。";
   const grid = document.getElementById("productGrid");
   grid.innerHTML = visible.map((product) => {
-    const twd = toTwd(product.krwPrice);
     return `<article class="product-card" role="button" tabindex="0" aria-label="查看 ${escapeAttr(product.name)}" data-product-id="${escapeAttr(product.id)}">
       ${productImage(product)}
       <div class="product-card-body"><span class="category-label">${escapeHtml(product.category || "韓國小物")}</span>
-      <h3>${escapeHtml(product.name)}</h3><p class="price">NT$${formatNumber(twd)}</p><small>₩${formatNumber(product.krwPrice)}・訂金 50%</small></div>
+      <h3>${escapeHtml(product.name)}</h3><p class="price">NT$${formatNumber(product.priceTwd)}</p><small>訂金 50%</small></div>
     </article>`;
   }).join("");
   grid.querySelectorAll(".product-card").forEach((card) => {
@@ -130,8 +129,7 @@ function openProduct(id) {
   image.alt = product.name;
   document.getElementById("dialogCategory").textContent = product.category || "韓國小物";
   document.getElementById("dialogName").textContent = product.name;
-  document.getElementById("dialogKrw").textContent = `韓幣 ₩${formatNumber(product.krwPrice)}`;
-  document.getElementById("dialogTwd").textContent = `預估 NT$${formatNumber(toTwd(product.krwPrice))}`;
+  document.getElementById("dialogTwd").textContent = `售價 NT$${formatNumber(product.priceTwd)}`;
   document.getElementById("dialogDescription").textContent = product.description || "韓國旅途中現場代購商品";
   const variants = Array.isArray(product.variants) ? product.variants : parseVariants(product.variants);
   document.getElementById("variantField").hidden = variants.length === 0;
@@ -167,7 +165,7 @@ function getTotals() {
     const product = state.products.find((entry) => entry.id === item.productId);
     if (!product) return;
     qty += item.qty;
-    estimatedTotal += toTwd(product.krwPrice) * item.qty;
+    estimatedTotal += Number(product.priceTwd || 0) * item.qty;
   });
   const depositTotal = Math.round(estimatedTotal * 0.5);
   return { qty, estimatedTotal, depositTotal, balanceTotal: estimatedTotal - depositTotal };
@@ -183,7 +181,7 @@ function renderCheckout() {
     const product = state.products.find((entry) => entry.id === item.productId);
     if (!product) return "";
     const image = product.imageUrl || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
-    return `<div class="checkout-item"><img src="${escapeAttr(image)}" alt="" /><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(item.variant || "單一款式")}・${item.qty} 件・NT$${formatNumber(toTwd(product.krwPrice) * item.qty)}</small></div><button class="remove-item" type="button" data-remove="${index}">移除</button></div>`;
+    return `<div class="checkout-item"><img src="${escapeAttr(image)}" alt="" /><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(item.variant || "單一款式")}・${item.qty} 件・NT$${formatNumber(Number(product.priceTwd || 0) * item.qty)}</small></div><button class="remove-item" type="button" data-remove="${index}">移除</button></div>`;
   }).join("");
   const totals = getTotals();
   document.getElementById("estimatedTotal").textContent = `NT$${formatNumber(totals.estimatedTotal)}`;
@@ -268,7 +266,7 @@ function showCatalog() {
 }
 
 function renderOrder(order) {
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待人工確認")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品預估</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>本次訂金（50%）</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>回國後商品款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待人工確認")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>本次訂金（50%）</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>回國後商品款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
 }
 
 async function apiPost(payload) {
@@ -276,7 +274,6 @@ async function apiPost(payload) {
   return response.json();
 }
 
-function toTwd(krw) { return Math.round(Number(krw || 0) * Number(state.settings.exchangeRate || 0.022)); }
 function parseVariants(value) { return String(value || "").split(/[、,\n]/).map((item) => item.trim()).filter(Boolean); }
 function formatNumber(value) { return Number(value || 0).toLocaleString("zh-TW"); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]); }

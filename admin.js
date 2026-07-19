@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-const adminState = { products: [], orders: [], settings: { exchangeRate: .022 }, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
+const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
@@ -37,7 +37,7 @@ function bindAdminEvents() {
   document.getElementById("refreshProducts").addEventListener("click", loadAdminProducts);
   document.getElementById("productSearch").addEventListener("input", renderAdminProducts);
   document.getElementById("statusFilter").addEventListener("change", renderAdminProducts);
-  document.getElementById("productKrwPrice").addEventListener("input", updateAdminPricePreview);
+  document.getElementById("productTwdPrice").addEventListener("input", updateAdminPricePreview);
   document.getElementById("productImageInput").addEventListener("change", uploadSelectedImage);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
@@ -205,7 +205,7 @@ function renderAdminProducts() {
   document.getElementById("adminProductList").innerHTML = products.map((product) => `<article class="admin-product-card ${product.active ? "" : "inactive"}">
     <img src="${escapeAttr(product.imageUrl || demoPlaceholder)}" alt="" />
     <div class="admin-product-info"><div class="admin-product-title"><h3>${escapeHtml(product.name)}</h3><span class="category-label">${escapeHtml(product.category)}</span></div>
-    <p>₩${formatNumber(product.krwPrice)} → NT$${formatNumber(toTwd(product.krwPrice))}</p>
+    <p>台幣售價 NT$${formatNumber(product.priceTwd)}</p>
     <div class="admin-card-actions"><button type="button" data-edit="${escapeAttr(product.id)}">編輯</button><button type="button" class="${product.active ? "toggle-on" : "toggle-off"}" data-toggle="${escapeAttr(product.id)}">${product.active ? "上架中" : "已下架"}</button></div></div>
   </article>`).join("");
   if (!products.length) setAdminStatus("沒有符合條件的商品。");
@@ -217,7 +217,7 @@ function openEditor(product = null) {
   document.getElementById("productId").value = product?.id || "";
   document.getElementById("productName").value = product?.name || "";
   document.getElementById("productCategory").value = product?.category || "";
-  document.getElementById("productKrwPrice").value = product?.krwPrice || "";
+  document.getElementById("productTwdPrice").value = product?.priceTwd || "";
   document.getElementById("productVariants").value = Array.isArray(product?.variants) ? product.variants.join(", ") : (product?.variants || "");
   document.getElementById("productDescription").value = product?.description || "";
   document.getElementById("productSortOrder").value = product?.sortOrder ?? adminState.products.length + 1;
@@ -285,7 +285,7 @@ async function saveProduct(event) {
       name: document.getElementById("productName").value.trim(),
       category: document.getElementById("productCategory").value.trim(),
       imageUrl: document.getElementById("productImageUrl").value.trim(),
-      krwPrice: Number(document.getElementById("productKrwPrice").value),
+      priceTwd: Number(document.getElementById("productTwdPrice").value),
       variants: parseVariants(document.getElementById("productVariants").value),
       description: document.getElementById("productDescription").value.trim(),
       sortOrder: Number(document.getElementById("productSortOrder").value || 0),
@@ -310,7 +310,6 @@ async function saveProduct(event) {
 }
 
 function fillSettings() {
-  document.getElementById("exchangeRate").value = adminState.settings.exchangeRate || .022;
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
   document.getElementById("bankTransferInfoSetting").value = adminState.settings.bankTransferInfo || "";
   document.getElementById("bankName").value = adminState.settings.bankName || "";
@@ -328,7 +327,6 @@ async function saveSettings(event) {
   event.preventDefault();
   if (adminState.bankUploadBusy) return showToast("請等 QR Code 上傳完成");
   const settings = {
-    exchangeRate: Number(document.getElementById("exchangeRate").value),
     preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
     bankTransferInfo: document.getElementById("bankTransferInfoSetting").value.trim(),
     bankName: document.getElementById("bankName").value.trim(),
@@ -371,7 +369,7 @@ async function uploadBankQr(event) {
 }
 
 function updateAdminPricePreview() {
-  document.getElementById("adminTwdPreview").textContent = `NT$${formatNumber(toTwd(document.getElementById("productKrwPrice").value))}`;
+  document.getElementById("adminTwdPreview").textContent = `NT$${formatNumber(document.getElementById("productTwdPrice").value)}`;
 }
 
 async function adminPost(payload) {
@@ -403,7 +401,6 @@ function compressImage(file, maxSide, quality) {
 function setAdminStatus(message, hidden = false) { const el = document.getElementById("adminStatus"); el.textContent = message; el.hidden = hidden; }
 function friendlyAdminError(message) { if (message === "ADMIN_FORBIDDEN") return "這個 LINE 帳號沒有管理員權限。"; if (message === "API_NOT_CONFIGURED") return "請先在 config.js 設定 GAS API 網址。"; if (message === "LIFF_NOT_CONFIGURED") return "請先在 config.js 設定 LIFF ID。"; return "目前無法開啟後台，請稍後再試。"; }
 function parseVariants(value) { return String(value || "").split(/[、,\n]/).map((item) => item.trim()).filter(Boolean); }
-function toTwd(krw) { return Math.round(Number(krw || 0) * Number(adminState.settings.exchangeRate || .022)); }
 function formatNumber(value) { return Number(value || 0).toLocaleString("zh-TW"); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]); }
 function escapeAttr(value) { return escapeHtml(value).replace(/'/g, "&#39;"); }

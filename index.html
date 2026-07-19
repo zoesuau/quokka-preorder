@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260717-winter" />
+    <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="app.js?v=20260719-half-deposit" defer></script>
+    <script src="app.js?v=20260719-twd-price" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -31,7 +31,7 @@
 
       <section class="notice-card" aria-label="預購說明">
         <strong>預購方式</strong>
-        <p id="preorderNotice">商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。</p>
+        <p id="preorderNotice">商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。</p>
       </section>
 
       <section class="catalog-section" id="catalogView">
@@ -75,7 +75,6 @@
       <div class="dialog-body">
         <span class="category-label" id="dialogCategory"></span>
         <h2 id="dialogName"></h2>
-        <p class="krw-price" id="dialogKrw"></p>
         <p class="twd-price" id="dialogTwd"></p>
         <p class="product-description" id="dialogDescription"></p>
         <label class="field" id="variantField">
@@ -102,10 +101,10 @@
       <form id="orderForm">
         <div class="checkout-items" id="checkoutItems"></div>
         <div class="money-card">
-          <div><span>商品預估總額</span><strong id="estimatedTotal">NT$0</strong></div>
-          <div class="deposit-row"><span>本次訂金（商品預估總額 50%）</span><strong id="depositTotal">NT$0</strong></div>
-          <div><span>回國後預估剩餘商品款</span><strong id="balanceTotal">NT$0</strong></div>
-          <small>商品款尚不含 iOPEN Mall 運費；實際金額以回國通知為準。</small>
+          <div><span>商品總額</span><strong id="estimatedTotal">NT$0</strong></div>
+          <div class="deposit-row"><span>本次訂金（商品總額 50%）</span><strong id="depositTotal">NT$0</strong></div>
+          <div><span>回國後剩餘商品款</span><strong id="balanceTotal">NT$0</strong></div>
+          <small>商品款尚不含 iOPEN Mall 運費，運費將於回國後結帳時另計。</small>
         </div>
 
         <h3 class="form-title">聯絡資料</h3>
@@ -116,7 +115,7 @@
 
         <label class="agreement">
           <input type="checkbox" id="agreement" required />
-          <span>我了解這是預購商品；下單先付商品預估總額的 50% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。</span>
+          <span>我了解這是預購商品；下單先付商品總額的 50% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。</span>
         </label>
         <button class="primary-button submit-button" id="submitOrder" type="submit">先送出預購訂單</button>
       </form>

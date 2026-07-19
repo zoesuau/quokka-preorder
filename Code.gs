@@ -10,7 +10,7 @@
 
 var PRODUCT_HEADERS_ = [
   "id", "name", "category", "imageUrl", "krwPrice", "variants",
-  "description", "status", "sortOrder", "createdAt", "updatedAt"
+  "description", "status", "sortOrder", "createdAt", "updatedAt", "priceTwd"
 ];
 
 var ORDER_HEADERS_ = [
@@ -23,7 +23,7 @@ var ORDER_HEADERS_ = [
 var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
-  preorderNotice: "商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。",
+  preorderNotice: "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。",
   bankTransferInfo: "",
   bankName: "",
   bankCode: "",
@@ -121,15 +121,14 @@ function handleCreatePreorder_(data) {
       if (product.variants.length && product.variants.indexOf(variant) === -1) {
         throw new Error("PRODUCT_CHANGED");
       }
-      var unitTwd = Math.round(product.krwPrice * settings.exchangeRate);
+      var unitTwd = product.priceTwd;
       cleanItems.push({
         productId: product.id,
         name: product.name,
         variant: variant,
         qty: qty,
-        krwPrice: product.krwPrice,
-        estimatedTwdUnit: unitTwd,
-        estimatedTwdSubtotal: unitTwd * qty
+        unitPriceTwd: unitTwd,
+        subtotalTwd: unitTwd * qty
       });
       totalQty += qty;
       estimatedTotal += unitTwd * qty;
@@ -223,7 +222,7 @@ function buildOrderSuccessMessage_(order) {
     { type: "text", text: order.itemsSummary, wrap: true, size: "sm", color: "#304B59" },
     { type: "separator", margin: "lg", color: "#E6DED5" },
     moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
-    moneyRow_("商品預估總額", "NT$" + formatMoney_(order.estimatedTotal)),
+    moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
     moneyRow_("本次訂金（50%）", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
     moneyRow_("回國後剩餘商品款", "NT$" + formatMoney_(order.estimatedBalance)),
     { type: "separator", margin: "lg", color: "#E6DED5" },
@@ -434,13 +433,13 @@ function handleAdminSaveProduct_(data) {
     if (!product.id) product.id = "p-" + Utilities.getUuid().slice(0, 12);
     var createdAt = rowNumber ? sheet.getRange(rowNumber, 10).getDisplayValue() : now;
     var row = [
-      product.id, product.name, product.category, product.imageUrl, product.krwPrice,
+      product.id, product.name, product.category, product.imageUrl, "",
       product.variants.join("\n"), product.description, product.active ? "上架" : "下架",
-      product.sortOrder, createdAt, now
+      product.sortOrder, createdAt, now, product.priceTwd
     ];
     if (rowNumber) sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).setValues([row]);
     else sheet.appendRow(row);
-    return json_({ ok: true, product: rowToProduct_(row) });
+    return json_({ ok: true, product: rowToProduct_(row, readSettings_().exchangeRate) });
   } finally {
     lock.releaseLock();
   }
@@ -460,7 +459,7 @@ function handleAdminToggleProduct_(data) {
     sheet.getRange(rowNumber, 8).setValue(data.active ? "上架" : "下架");
     sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
     var row = sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).getValues()[0];
-    return json_({ ok: true, product: rowToProduct_(row) });
+    return json_({ ok: true, product: rowToProduct_(row, readSettings_().exchangeRate) });
   } finally {
     lock.releaseLock();
   }
@@ -490,8 +489,9 @@ function handleAdminUploadProductImage_(data) {
 function handleAdminSaveSettings_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var source = data.settings || {};
+  var currentSettings = readSettings_();
   var settings = {
-    exchangeRate: Number(source.exchangeRate),
+    exchangeRate: currentSettings.exchangeRate,
     preorderNotice: cleanText_(source.preorderNotice, 300),
     bankTransferInfo: cleanText_(source.bankTransferInfo, 300),
     bankName: cleanText_(source.bankName, 50),
@@ -501,7 +501,6 @@ function handleAdminSaveSettings_(data) {
     bankQrUrl: cleanText_(source.bankQrUrl, 500),
     iopenMallUrl: cleanText_(source.iopenMallUrl, 500)
   };
-  if (!Number.isFinite(settings.exchangeRate) || settings.exchangeRate <= 0 || settings.exchangeRate > 1) throw new Error("INVALID_SETTINGS");
   if (settings.bankQrUrl && !/^https:\/\//i.test(settings.bankQrUrl)) throw new Error("INVALID_SETTINGS");
   if (settings.iopenMallUrl && !/^https:\/\//i.test(settings.iopenMallUrl)) throw new Error("INVALID_SETTINGS");
 
@@ -544,7 +543,7 @@ function validateProduct_(source) {
     name: cleanText_(source.name, 100),
     category: cleanText_(source.category, 30),
     imageUrl: cleanText_(source.imageUrl, 500),
-    krwPrice: Number(source.krwPrice),
+    priceTwd: Number(source.priceTwd),
     variants: variants,
     description: cleanText_(source.description, 500),
     active: source.active === true,
@@ -552,7 +551,7 @@ function validateProduct_(source) {
   };
   if (!product.name || !product.category || !product.imageUrl) throw new Error("INVALID_PRODUCT");
   if (!/^https:\/\//i.test(product.imageUrl)) throw new Error("INVALID_PRODUCT");
-  if (!Number.isInteger(product.krwPrice) || product.krwPrice < 1 || product.krwPrice > 100000000) throw new Error("INVALID_PRODUCT");
+  if (!Number.isInteger(product.priceTwd) || product.priceTwd < 1 || product.priceTwd > 100000000) throw new Error("INVALID_PRODUCT");
   if (!Number.isInteger(product.sortOrder) || product.sortOrder < 0 || product.sortOrder > 9999) throw new Error("INVALID_PRODUCT");
   return product;
 }
@@ -560,19 +559,24 @@ function validateProduct_(source) {
 function readProducts_() {
   var sheet = spreadsheet_().getSheetByName("Products");
   if (!sheet || sheet.getLastRow() < 2) return [];
+  var legacyExchangeRate = readSettings_().exchangeRate;
   var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, PRODUCT_HEADERS_.length).getValues();
-  return rows.filter(function (row) { return String(row[0] || "").trim(); }).map(rowToProduct_).sort(function (a, b) {
+  return rows.filter(function (row) { return String(row[0] || "").trim(); }).map(function (row) {
+    return rowToProduct_(row, legacyExchangeRate);
+  }).sort(function (a, b) {
     return a.sortOrder - b.sortOrder || String(b.updatedAt).localeCompare(String(a.updatedAt));
   });
 }
 
-function rowToProduct_(row) {
+function rowToProduct_(row, legacyExchangeRate) {
+  var priceTwd = number_(row[11]);
+  if (!priceTwd) priceTwd = Math.round(number_(row[4]) * number_(legacyExchangeRate || DEFAULT_SETTINGS_.exchangeRate));
   return {
     id: String(row[0] || "").trim(),
     name: String(row[1] || "").trim(),
     category: String(row[2] || "").trim(),
     imageUrl: String(row[3] || "").trim(),
-    krwPrice: number_(row[4]),
+    priceTwd: priceTwd,
     variants: String(row[5] || "").split(/\n/).map(function (value) { return value.trim(); }).filter(Boolean),
     description: String(row[6] || "").trim(),
     active: String(row[7] || "").trim() === "上架",
@@ -600,6 +604,9 @@ function readSettings_() {
     if (key === "iopenMallUrl") settings.iopenMallUrl = String(row[1] || "").trim();
   });
   if (settings.preorderNotice === "商品下訂後才會採購。代購費為商品費用外加；若韓國現場缺貨，該商品代購費將全額退回。") {
+    settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
+  }
+  if (settings.preorderNotice === "商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。") {
     settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
   }
   return settings;
