@@ -23,9 +23,7 @@ var ORDER_HEADERS_ = [
 var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
-  depositPerItem: 50,
-  socialIdRequired: false,
-  preorderNotice: "商品下訂後才會採購。代購費為商品費用外加；若韓國現場缺貨，該商品代購費將全額退回。",
+  preorderNotice: "商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。",
   bankTransferInfo: "",
   bankName: "",
   bankCode: "",
@@ -104,7 +102,7 @@ function handleCreatePreorder_(data) {
   try {
     setupQuokkaPreorder();
     var settings = readSettings_();
-    validatePreorderFields_(data, settings);
+    validatePreorderFields_(data);
     var catalog = readProducts_();
     var productMap = {};
     catalog.forEach(function (product) { productMap[product.id] = product; });
@@ -138,8 +136,8 @@ function handleCreatePreorder_(data) {
     });
 
     if (!cleanItems.length || totalQty > 100) throw new Error("INVALID_ITEMS");
-    var depositTotal = totalQty * settings.depositPerItem;
-    var estimatedBalance = estimatedTotal;
+    var depositTotal = Math.round(estimatedTotal * 0.5);
+    var estimatedBalance = estimatedTotal - depositTotal;
     var now = new Date();
     var orderNo = createOrderNo_(now);
     var itemsSummary = cleanItems.map(function (item) {
@@ -163,7 +161,7 @@ function handleCreatePreorder_(data) {
       "",
       cleanText_(data.note, 300),
       "待人工確認",
-      cleanText_(data.socialProfileId, 100),
+      "",
       "未出貨",
       ""
     ]);
@@ -226,8 +224,8 @@ function buildOrderSuccessMessage_(order) {
     { type: "separator", margin: "lg", color: "#E6DED5" },
     moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
     moneyRow_("商品預估總額", "NT$" + formatMoney_(order.estimatedTotal)),
-    moneyRow_("本次代購費", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
-    moneyRow_("回國後預估商品款", "NT$" + formatMoney_(order.estimatedBalance)),
+    moneyRow_("本次訂金（50%）", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
+    moneyRow_("回國後剩餘商品款", "NT$" + formatMoney_(order.estimatedBalance)),
     { type: "separator", margin: "lg", color: "#E6DED5" },
     { type: "text", text: "匯款帳戶", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
     { type: "text", text: transferInfo, wrap: true, size: "sm", margin: "sm", color: "#304B59" }
@@ -238,7 +236,7 @@ function buildOrderSuccessMessage_(order) {
   bodyContents.push({ type: "text", text: "匯款完成後，請按下方按鈕人工回報。", wrap: true, size: "xs", margin: "md", color: "#75858D" });
   return {
       type: "flex",
-      altText: "訂單已成立｜" + order.orderNo + "｜應付代購費 NT$" + formatMoney_(order.depositTotal),
+      altText: "訂單已成立｜" + order.orderNo + "｜應付訂金 NT$" + formatMoney_(order.depositTotal),
       contents: {
         type: "bubble",
         styles: {
@@ -301,8 +299,8 @@ function handleConfirmPreorderPayment_(data) {
       if (String(row[2]).trim() !== profile.sub) throw new Error("ORDER_FORBIDDEN");
       sheet.getRange(index + 2, 13).setValue("銀行轉帳");
       sheet.getRange(index + 2, 14).setValue(transferLast5);
-      sheet.getRange(index + 2, 16).setValue("待確認代購費");
-      return json_({ ok: true, orderNo: orderNo, status: "待確認代購費" });
+      sheet.getRange(index + 2, 16).setValue("待確認訂金");
+      return json_({ ok: true, orderNo: orderNo, status: "待確認訂金" });
     }
     throw new Error("ORDER_NOT_FOUND");
   } finally {
@@ -494,8 +492,6 @@ function handleAdminSaveSettings_(data) {
   var source = data.settings || {};
   var settings = {
     exchangeRate: Number(source.exchangeRate),
-    depositPerItem: Number(source.depositPerItem),
-    socialIdRequired: source.socialIdRequired === true,
     preorderNotice: cleanText_(source.preorderNotice, 300),
     bankTransferInfo: cleanText_(source.bankTransferInfo, 300),
     bankName: cleanText_(source.bankName, 50),
@@ -506,7 +502,6 @@ function handleAdminSaveSettings_(data) {
     iopenMallUrl: cleanText_(source.iopenMallUrl, 500)
   };
   if (!Number.isFinite(settings.exchangeRate) || settings.exchangeRate <= 0 || settings.exchangeRate > 1) throw new Error("INVALID_SETTINGS");
-  if (!Number.isInteger(settings.depositPerItem) || settings.depositPerItem < 0 || settings.depositPerItem > 10000) throw new Error("INVALID_SETTINGS");
   if (settings.bankQrUrl && !/^https:\/\//i.test(settings.bankQrUrl)) throw new Error("INVALID_SETTINGS");
   if (settings.iopenMallUrl && !/^https:\/\//i.test(settings.iopenMallUrl)) throw new Error("INVALID_SETTINGS");
 
@@ -517,10 +512,8 @@ function handleAdminSaveSettings_(data) {
     var sheet = spreadsheet_().getSheetByName("Settings");
     var rows = [
       ["exchangeRate", settings.exchangeRate, "韓幣換算率"],
-      ["depositPerItem", settings.depositPerItem, "每件代購費（商品費用外加）"],
-      ["socialIdRequired", settings.socialIdRequired ? "true" : "false", "LINE 社群 ID 必填"],
       ["preorderNotice", settings.preorderNotice, "前台預購說明"],
-      ["bankTransferInfo", settings.bankTransferInfo, "代購費匯款資訊"],
+      ["bankTransferInfo", settings.bankTransferInfo, "訂金匯款資訊"],
       ["bankName", settings.bankName, "銀行名稱"],
       ["bankCode", settings.bankCode, "銀行代碼"],
       ["bankAccount", settings.bankAccount, "匯款帳號"],
@@ -536,10 +529,9 @@ function handleAdminSaveSettings_(data) {
   }
 }
 
-function validatePreorderFields_(data, settings) {
+function validatePreorderFields_(data) {
   if (!data || !Array.isArray(data.items) || !data.items.length) throw new Error("INVALID_ITEMS");
   if (!String(data.customerName || "").trim() || !String(data.phone || "").trim()) throw new Error("INVALID_CUSTOMER");
-  if (settings && settings.socialIdRequired && !String(data.socialProfileId || "").trim()) throw new Error("SOCIAL_ID_REQUIRED");
 }
 
 function validateProduct_(source) {
@@ -598,8 +590,6 @@ function readSettings_() {
   rows.forEach(function (row) {
     var key = String(row[0] || "").trim();
     if (key === "exchangeRate") settings.exchangeRate = number_(row[1]) || DEFAULT_SETTINGS_.exchangeRate;
-    if (key === "depositPerItem") settings.depositPerItem = number_(row[1]);
-    if (key === "socialIdRequired") settings.socialIdRequired = String(row[1] || "").toLowerCase() === "true";
     if (key === "preorderNotice") settings.preorderNotice = String(row[1] || "").trim();
     if (key === "bankTransferInfo") settings.bankTransferInfo = String(row[1] || "").trim();
     if (key === "bankName") settings.bankName = String(row[1] || "").trim();
@@ -679,12 +669,10 @@ function ensureSheet_(ss, name, headers) {
 function ensureSettingsSheet_(ss) {
   var sheet = ensureSheet_(ss, "Settings", SETTING_HEADERS_);
   if (sheet.getLastRow() < 2) {
-    sheet.getRange(2, 1, 11, 3).setValues([
+    sheet.getRange(2, 1, 9, 3).setValues([
       ["exchangeRate", DEFAULT_SETTINGS_.exchangeRate, "韓幣換算率"],
-      ["depositPerItem", DEFAULT_SETTINGS_.depositPerItem, "每件代購費（商品費用外加）"],
-      ["socialIdRequired", "false", "LINE 社群 ID 必填"],
       ["preorderNotice", DEFAULT_SETTINGS_.preorderNotice, "前台預購說明"],
-      ["bankTransferInfo", "", "代購費匯款資訊"],
+      ["bankTransferInfo", "", "訂金匯款資訊"],
       ["bankName", "", "銀行名稱"],
       ["bankCode", "", "銀行代碼"],
       ["bankAccount", "", "匯款帳號"],
@@ -727,7 +715,7 @@ function safeError_(error) {
   var message = String(error && error.message || error || "UNKNOWN_ERROR");
   var allowed = [
     "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "ADMIN_ACCESS_CODE_MISSING", "ADMIN_LOGIN_FAILED", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
-    "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "SOCIAL_ID_REQUIRED", "INVALID_TRANSFER_LAST5",
+    "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
     "ORDER_NOT_FOUND", "ORDER_FORBIDDEN", "INVALID_ORDER_STATUS",
     "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
     "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING"

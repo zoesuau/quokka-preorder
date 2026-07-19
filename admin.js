@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-const adminState = { products: [], orders: [], settings: { exchangeRate: .022, depositPerItem: 50 }, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
+const adminState = { products: [], orders: [], settings: { exchangeRate: .022 }, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
@@ -153,7 +153,7 @@ function renderAdminOrders() {
     const shipped = order.shippingStatus === "已出貨";
     if (filter === "unshipped" && shipped) return false;
     if (filter === "shipped" && !shipped) return false;
-    const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName} ${order.socialProfileId}`.toLowerCase();
+    const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName}`.toLowerCase();
     return !search || haystack.includes(search);
   });
   document.getElementById("adminOrderList").innerHTML = orders.length ? orders.map(renderAdminOrderCard).join("") : `<div class="empty-orders">沒有符合條件的訂單。</div>`;
@@ -168,8 +168,7 @@ function renderAdminOrderCard(order) {
     <dl class="customer-details">
       <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
       <div><dt>LINE</dt><dd>${escapeHtml(order.lineDisplayName || "—")}</dd></div>
-      <div><dt>LINE 社群 ID</dt><dd>${escapeHtml(order.socialProfileId || "未填寫")}</dd></div>
-      <div><dt>金額</dt><dd>商品款 NT$${formatNumber(order.estimatedTotal)}／代購費 NT$${formatNumber(order.depositTotal)}／回國後商品款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
+      <div><dt>金額</dt><dd>商品款 NT$${formatNumber(order.estimatedTotal)}／訂金 50% NT$${formatNumber(order.depositTotal)}／剩餘商品款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
       <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
       ${shipped && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
     </dl>
@@ -312,8 +311,6 @@ async function saveProduct(event) {
 
 function fillSettings() {
   document.getElementById("exchangeRate").value = adminState.settings.exchangeRate || .022;
-  document.getElementById("depositPerItem").value = adminState.settings.depositPerItem ?? 50;
-  document.getElementById("socialIdRequired").checked = adminState.settings.socialIdRequired === true;
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
   document.getElementById("bankTransferInfoSetting").value = adminState.settings.bankTransferInfo || "";
   document.getElementById("bankName").value = adminState.settings.bankName || "";
@@ -332,8 +329,6 @@ async function saveSettings(event) {
   if (adminState.bankUploadBusy) return showToast("請等 QR Code 上傳完成");
   const settings = {
     exchangeRate: Number(document.getElementById("exchangeRate").value),
-    depositPerItem: Number(document.getElementById("depositPerItem").value),
-    socialIdRequired: document.getElementById("socialIdRequired").checked,
     preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
     bankTransferInfo: document.getElementById("bankTransferInfoSetting").value.trim(),
     bankName: document.getElementById("bankName").value.trim(),
