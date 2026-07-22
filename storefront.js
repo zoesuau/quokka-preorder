@@ -7,6 +7,7 @@ const state = {
   cart: [],
   selectedProduct: null,
   line: { idToken: "", userId: "", displayName: "" },
+  myOrders: null,
 };
 
 const demoProducts = [
@@ -72,6 +73,29 @@ async function initLine() {
   } catch (error) {
     console.warn("LINE profile unavailable", error);
   }
+  await validateLineSession();
+}
+
+async function validateLineSession() {
+  if (!CONFIG.apiUrl || !state.line.idToken) return;
+  const result = await apiPost({ action: "readMyPreorders", idToken: state.line.idToken });
+  if (!result.ok) {
+    if (result.error === "LINE_TOKEN_INVALID" && restartLineLogin()) return;
+    throw new Error(result.error || "LINE_SESSION_CHECK_FAILED");
+  }
+  state.myOrders = Array.isArray(result.orders) ? result.orders : [];
+  sessionStorage.removeItem("quokka-line-login-retry");
+  setLineStatus("verified");
+}
+
+function restartLineLogin() {
+  const lineRuntime = window.QuokkaLineRuntime;
+  if (!lineRuntime || sessionStorage.getItem("quokka-line-login-retry") === "1") return false;
+  sessionStorage.setItem("quokka-line-login-retry", "1");
+  setLineStatus("refreshing");
+  lineRuntime.logout();
+  lineRuntime.login({ redirectUri: getLiffRedirectUri() });
+  return true;
 }
 
 function setLineStatus(value) {
@@ -264,7 +288,9 @@ async function submitOrder(event) {
       SPREADSHEET_CONFIG_MISSING: "訂單系統尚未連接試算表，請聯絡管理員",
       SERVER_ERROR: "訂單系統暫時發生錯誤，請聯絡管理員",
     };
-    if (error.message === "SALE_CLOSED") {
+    if (error.message === "LINE_TOKEN_INVALID" && restartLineLogin()) {
+      return;
+    } else if (error.message === "SALE_CLOSED") {
       state.settings.saleClosed = true;
       updateSaleClosedState();
     } else {
@@ -305,8 +331,11 @@ async function showMyOrders() {
     return;
   }
   try {
-    const result = await apiPost({ action: "readMyPreorders", idToken: state.line.idToken });
+    const result = Array.isArray(state.myOrders)
+      ? { ok: true, orders: state.myOrders }
+      : await apiPost({ action: "readMyPreorders", idToken: state.line.idToken });
     if (!result.ok || !Array.isArray(result.orders)) throw new Error(result.error || "READ_FAILED");
+    state.myOrders = result.orders;
     if (!result.orders.length) { status.textContent = "目前還沒有預購紀錄。"; return; }
     status.hidden = true;
     list.innerHTML = result.orders.map(renderOrder).join("");
