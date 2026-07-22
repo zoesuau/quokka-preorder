@@ -9,21 +9,48 @@
  */
 
 var PRODUCT_HEADERS_ = [
-  "id", "name", "category", "imageUrl", "krwPrice", "variants",
-  "description", "status", "sortOrder", "createdAt", "updatedAt", "priceTwd"
+  "id",
+  "name",
+  "category",
+  "imageUrl",
+  "krwPrice",
+  "variants",
+  "description",
+  "status",
+  "sortOrder",
+  "createdAt",
+  "updatedAt",
+  "priceTwd",
 ];
 
 var ORDER_HEADERS_ = [
-  "orderNo", "createdAt", "lineUserId", "lineDisplayName", "customerName",
-  "phone", "itemsJson", "itemsSummary", "totalQty", "estimatedTotal",
-  "depositTotal", "estimatedBalance", "paymentMethod", "transferLast5",
-  "note", "status", "socialProfileId", "shippingStatus", "shippedAt",
-  "reminderSentAt", "cancelledAt"
+  "orderNo",
+  "createdAt",
+  "lineUserId",
+  "lineDisplayName",
+  "customerName",
+  "phone",
+  "itemsJson",
+  "itemsSummary",
+  "totalQty",
+  "estimatedTotal",
+  "depositTotal",
+  "estimatedBalance",
+  "paymentMethod",
+  "transferLast5",
+  "note",
+  "status",
+  "socialProfileId",
+  "shippingStatus",
+  "shippedAt",
+  "reminderSentAt",
+  "cancelledAt",
 ];
 
 var ORDER_STATUS_PENDING_ = "待收訂金";
 var ORDER_STATUS_DEPOSIT_RECEIVED_ = "已收到訂金";
-var ORDER_STATUS_SHIPPED_ = "已出貨";
+var ORDER_STATUS_SHIPPED_ = "已開設 iOPEN Mall 賣場";
+var ORDER_STATUS_SHIPPED_LEGACY_ = "已出貨";
 var ORDER_STATUS_CANCELLED_ = "已取消";
 var ORDER_REMINDER_HOURS_ = 12;
 var ORDER_EXPIRES_DISPLAY_HOURS_ = 24;
@@ -32,7 +59,8 @@ var ORDER_AUTO_CANCEL_HOURS_ = 25;
 var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
-  preorderNotice: "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。",
+  preorderNotice:
+    "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。",
   saleClosed: false,
   saleClosedNotice: "本次連線已結束，謝謝大家的支持！",
   bankTransferInfo: "",
@@ -41,12 +69,12 @@ var DEFAULT_SETTINGS_ = {
   bankAccount: "",
   bankAccountName: "",
   bankQrUrl: "",
-  iopenMallUrl: ""
+  iopenMallUrl: "https://mall.iopenmall.tw/112415/",
 };
 var PRODUCT_IMAGE_FOLDER_ = "quokka-preorder-product-images";
 
 function doGet(e) {
-  var action = String(e && e.parameter && e.parameter.action || "").trim();
+  var action = String((e && e.parameter && e.parameter.action) || "").trim();
   if (action === "readPublicCatalog") return handleReadPublicCatalog_();
   return json_({ ok: false, error: "UNSUPPORTED_ACTION" });
 }
@@ -57,16 +85,20 @@ function doPost(e) {
     var action = String(data.action || "").trim();
 
     if (action === "createPreorder") return handleCreatePreorder_(data);
-    if (action === "confirmPreorderPayment") return handleConfirmPreorderPayment_(data);
+    if (action === "confirmPreorderPayment")
+      return handleConfirmPreorderPayment_(data);
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
     if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
-    if (action === "adminUpdateOrderStatus") return handleAdminUpdateOrderStatus_(data);
+    if (action === "adminUpdateOrderStatus")
+      return handleAdminUpdateOrderStatus_(data);
     if (action === "adminCancelOrder") return handleAdminCancelOrder_(data);
-    if (action === "adminSendOrderReminder") return handleAdminSendOrderReminder_(data);
+    if (action === "adminSendOrderReminder")
+      return handleAdminSendOrderReminder_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
-    if (action === "adminUploadProductImage") return handleAdminUploadProductImage_(data);
+    if (action === "adminUploadProductImage")
+      return handleAdminUploadProductImage_(data);
     if (action === "adminSaveSettings") return handleAdminSaveSettings_(data);
 
     return json_({ ok: false, error: "UNSUPPORTED_ACTION" });
@@ -77,10 +109,13 @@ function doPost(e) {
 }
 
 function handleAdminLogin_(data) {
-  var expectedCode = PropertiesService.getScriptProperties().getProperty("ADMIN_ACCESS_CODE") || "";
-  var providedCode = String(data && data.accessCode || "").trim();
+  var expectedCode =
+    PropertiesService.getScriptProperties().getProperty("ADMIN_ACCESS_CODE") ||
+    "";
+  var providedCode = String((data && data.accessCode) || "").trim();
   if (!expectedCode) throw new Error("ADMIN_ACCESS_CODE_MISSING");
-  if (!providedCode || providedCode !== expectedCode) throw new Error("ADMIN_LOGIN_FAILED");
+  if (!providedCode || providedCode !== expectedCode)
+    throw new Error("ADMIN_LOGIN_FAILED");
   var token = Utilities.getUuid() + Utilities.getUuid();
   CacheService.getScriptCache().put("admin-session-" + token, "1", 21600);
   return json_({ ok: true, adminSessionToken: token, expiresIn: 21600 });
@@ -119,16 +154,24 @@ function handleCreatePreorder_(data) {
     validatePreorderFields_(data);
     var catalog = readProducts_();
     var productMap = {};
-    catalog.forEach(function (product) { productMap[product.id] = product; });
+    catalog.forEach(function (product) {
+      productMap[product.id] = product;
+    });
 
     var cleanItems = [];
     var totalQty = 0;
     var estimatedTotal = 0;
     data.items.forEach(function (sourceItem) {
-      var productId = String(sourceItem && sourceItem.productId || "").trim();
+      var productId = String((sourceItem && sourceItem.productId) || "").trim();
       var product = productMap[productId];
       var qty = Number(sourceItem && sourceItem.qty);
-      if (!product || !product.active || !Number.isInteger(qty) || qty < 1 || qty > 20) {
+      if (
+        !product ||
+        !product.active ||
+        !Number.isInteger(qty) ||
+        qty < 1 ||
+        qty > 20
+      ) {
         throw new Error("PRODUCT_CHANGED");
       }
       var variant = String(sourceItem.variant || "").trim();
@@ -142,7 +185,7 @@ function handleCreatePreorder_(data) {
         variant: variant,
         qty: qty,
         unitPriceTwd: unitTwd,
-        subtotalTwd: unitTwd * qty
+        subtotalTwd: unitTwd * qty,
       });
       totalQty += qty;
       estimatedTotal += unitTwd * qty;
@@ -153,15 +196,24 @@ function handleCreatePreorder_(data) {
     var estimatedBalance = estimatedTotal - depositTotal;
     var now = new Date();
     var orderNo = createOrderNo_(now);
-    var itemsSummary = cleanItems.map(function (item) {
-      return item.name + (item.variant ? "｜" + item.variant : "") + " × " + item.qty;
-    }).join("\n");
+    var itemsSummary = cleanItems
+      .map(function (item) {
+        return (
+          item.name +
+          (item.variant ? "｜" + item.variant : "") +
+          " × " +
+          item.qty
+        );
+      })
+      .join("\n");
     var sheet = spreadsheet_().getSheetByName("Preorders");
     sheet.appendRow([
       orderNo,
       formatDateTime_(now),
       profile.sub,
-      String(data.lineDisplayName || profile.name || "").trim().slice(0, 80),
+      String(data.lineDisplayName || profile.name || "")
+        .trim()
+        .slice(0, 80),
       cleanText_(data.customerName, 30),
       cleanText_(data.phone, 20),
       JSON.stringify(cleanItems),
@@ -175,10 +227,10 @@ function handleCreatePreorder_(data) {
       cleanText_(data.note, 300),
       ORDER_STATUS_PENDING_,
       "",
-      "未出貨",
+      "未開設賣場",
       "",
       "",
-      ""
+      "",
     ]);
     orderResult = {
       orderNo: orderNo,
@@ -187,7 +239,7 @@ function handleCreatePreorder_(data) {
       totalQty: totalQty,
       estimatedTotal: estimatedTotal,
       depositTotal: depositTotal,
-      estimatedBalance: estimatedBalance
+      estimatedBalance: estimatedBalance,
     };
   } finally {
     lock.releaseLock();
@@ -199,32 +251,44 @@ function handleCreatePreorder_(data) {
     estimatedTotal: orderResult.estimatedTotal,
     depositTotal: orderResult.depositTotal,
     estimatedBalance: orderResult.estimatedBalance,
-    botMessageSent: botMessageSent
+    botMessageSent: botMessageSent,
   });
 }
 
 function pushOrderSuccessCard_(lineUserId, order) {
-  return pushLineMessage_(lineUserId, buildOrderSuccessMessage_(order), "order success " + order.orderNo);
+  return pushLineMessage_(
+    lineUserId,
+    buildOrderSuccessMessage_(order),
+    "order success " + order.orderNo,
+  );
 }
 
 function pushLineMessage_(lineUserId, message, logLabel) {
-  var accessToken = PropertiesService.getScriptProperties().getProperty("LINE_MESSAGING_ACCESS_TOKEN") || "";
+  var accessToken =
+    PropertiesService.getScriptProperties().getProperty(
+      "LINE_MESSAGING_ACCESS_TOKEN",
+    ) || "";
   if (!accessToken || !lineUserId) return false;
   var payload = { to: lineUserId, messages: [message] };
   try {
-    var response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
-      method: "post",
-      contentType: "application/json",
-      headers: { Authorization: "Bearer " + accessToken },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
+    var response = UrlFetchApp.fetch(
+      "https://api.line.me/v2/bot/message/push",
+      {
+        method: "post",
+        contentType: "application/json",
+        headers: { Authorization: "Bearer " + accessToken },
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true,
+      },
+    );
     var code = response.getResponseCode();
     if (code >= 200 && code < 300) {
       console.log("LINE push sent: " + String(logLabel || "message"));
       return true;
     }
-    console.error("LINE push failed: " + code + " " + response.getContentText());
+    console.error(
+      "LINE push failed: " + code + " " + response.getContentText(),
+    );
   } catch (error) {
     console.error("LINE push failed: " + safeError_(error));
   }
@@ -232,69 +296,153 @@ function pushLineMessage_(lineUserId, message, logLabel) {
 }
 
 function buildOrderSuccessMessage_(order) {
-  var transferRequestText = "您好，我想索取匯款資訊\n訂單編號：" + order.orderNo + "\n收件人姓名：" + order.customerName;
-  var reportText = "您好，我要回報匯款\n訂單編號：" + order.orderNo + "\n收件人姓名：" + order.customerName + "\n匯款後三碼：";
-  var reportUrl = "https://line.me/R/oaMessage/%40527tnlnn/?" + encodeURIComponent(reportText);
+  var transferRequestText =
+    "您好，我想索取匯款資訊\n訂單編號：" +
+    order.orderNo +
+    "\n收件人姓名：" +
+    order.customerName;
+  var reportText = "匯款資訊";
+  var reportUrl =
+    "https://line.me/R/oaMessage/%40527tnlnn/?" +
+    encodeURIComponent(reportText);
   var bodyContents = [
-    { type: "text", text: order.itemsSummary, wrap: true, size: "sm", color: "#304B59" },
+    {
+      type: "text",
+      text: order.itemsSummary,
+      wrap: true,
+      size: "sm",
+      color: "#304B59",
+    },
     { type: "separator", margin: "lg", color: "#E6DED5" },
     moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
     moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
-    moneyRow_("本次訂金（50%）", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
+    moneyRow_(
+      "本次訂金（50%）",
+      "NT$" + formatMoney_(order.depositTotal),
+      "#EF0025",
+    ),
     moneyRow_("回國後剩餘商品款", "NT$" + formatMoney_(order.estimatedBalance)),
     { type: "separator", margin: "lg", color: "#E6DED5" },
-    { type: "text", text: "需要匯款嗎？", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
-    { type: "text", text: "請按下方「匯款資訊」，系統會送出文字訊息，由管理方提供帳戶。", wrap: true, size: "xs", margin: "sm", color: "#75858D" }
+    {
+      type: "text",
+      text: "請於 24 小時內完成訂金匯款，才算完成預訂。",
+      wrap: true,
+      weight: "bold",
+      size: "sm",
+      margin: "lg",
+      color: "#EF0025",
+    },
+    {
+      type: "text",
+      text: "需要匯款嗎？",
+      weight: "bold",
+      size: "sm",
+      margin: "lg",
+      color: "#304B59",
+    },
+    {
+      type: "text",
+      text: "請按下方「匯款資訊」，系統會送出文字訊息，由管理方提供帳戶。",
+      wrap: true,
+      size: "xs",
+      margin: "sm",
+      color: "#75858D",
+    },
   ];
   return {
-      type: "flex",
-      altText: "訂單已成立｜" + order.orderNo + "｜應付訂金 NT$" + formatMoney_(order.depositTotal),
-      contents: {
-        type: "bubble",
-        styles: {
-          header: { backgroundColor: "#47748E" },
-          footer: { separator: true, separatorColor: "#E6DED5" }
-        },
-        header: {
-          type: "box", layout: "vertical", paddingAll: "18px",
-          contents: [
-            { type: "text", text: "預購訂單已成立", color: "#FFFFFF", weight: "bold", size: "xl" },
-            { type: "text", text: order.orderNo, color: "#DCECF3", size: "sm", margin: "sm" }
-          ]
-        },
-        body: {
-          type: "box", layout: "vertical", paddingAll: "18px", backgroundColor: "#FFFDF7",
-          contents: bodyContents
-        },
-        footer: {
-          type: "box", layout: "vertical", paddingAll: "14px", spacing: "sm",
-          contents: [
-            {
-              type: "button", style: "primary", color: "#47748E", height: "sm",
-              action: { type: "message", label: "匯款資訊", text: transferRequestText }
+    type: "flex",
+    altText:
+      "已收到預購訂單｜" +
+      order.orderNo +
+      "｜應付訂金 NT$" +
+      formatMoney_(order.depositTotal),
+    contents: {
+      type: "bubble",
+      styles: {
+        header: { backgroundColor: "#47748E" },
+        footer: { separator: true, separatorColor: "#E6DED5" },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        contents: [
+          {
+            type: "text",
+            text: "已收到預購訂單",
+            color: "#FFFFFF",
+            weight: "bold",
+            size: "xl",
+          },
+          {
+            type: "text",
+            text: order.orderNo,
+            color: "#DCECF3",
+            size: "sm",
+            margin: "sm",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        backgroundColor: "#FFFDF7",
+        contents: bodyContents,
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "14px",
+        spacing: "sm",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#47748E",
+            height: "sm",
+            action: {
+              type: "message",
+              label: "匯款資訊",
+              text: transferRequestText,
             },
-            {
-              type: "button", style: "secondary", height: "sm",
-              action: { type: "uri", label: "已匯款，前往回報", uri: reportUrl }
-            }
-          ]
-        }
-      }
-    };
+          },
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            action: { type: "uri", label: "已匯款，前往回報", uri: reportUrl },
+          },
+        ],
+      },
+    },
+  };
 }
 
 function moneyRow_(label, value, valueColor) {
   return {
-    type: "box", layout: "horizontal", margin: "md",
+    type: "box",
+    layout: "horizontal",
+    margin: "md",
     contents: [
       { type: "text", text: label, size: "sm", color: "#75858D", flex: 3 },
-      { type: "text", text: value, size: "sm", color: valueColor || "#304B59", weight: "bold", align: "end", flex: 2 }
-    ]
+      {
+        type: "text",
+        text: value,
+        size: "sm",
+        color: valueColor || "#304B59",
+        weight: "bold",
+        align: "end",
+        flex: 2,
+      },
+    ],
   };
 }
 
 function formatMoney_(value) {
-  return Math.round(number_(value)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return Math.round(number_(value))
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 function handleConfirmPreorderPayment_(data) {
@@ -310,11 +458,14 @@ function handleConfirmPreorderPayment_(data) {
     var sheet = spreadsheet_().getSheetByName("Preorders");
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) throw new Error("ORDER_NOT_FOUND");
-    var values = sheet.getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length).getDisplayValues();
+    var values = sheet
+      .getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length)
+      .getDisplayValues();
     for (var index = values.length - 1; index >= 0; index--) {
       var row = values[index];
       if (String(row[0]).trim() !== orderNo) continue;
-      if (String(row[2]).trim() !== profile.sub) throw new Error("ORDER_FORBIDDEN");
+      if (String(row[2]).trim() !== profile.sub)
+        throw new Error("ORDER_FORBIDDEN");
       sheet.getRange(index + 2, 13).setValue("銀行轉帳");
       sheet.getRange(index + 2, 14).setValue(transferLast5);
       sheet.getRange(index + 2, 16).setValue("待確認訂金");
@@ -332,15 +483,21 @@ function handleReadMyPreorders_(data) {
   var sheet = spreadsheet_().getSheetByName("Preorders");
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return json_({ ok: true, orders: [] });
-  var rows = sheet.getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var rows = sheet
+    .getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length)
+    .getDisplayValues();
   var orders = [];
   for (var index = rows.length - 1; index >= 0 && orders.length < 50; index--) {
     var row = rows[index];
     if (String(row[2]).trim() !== profile.sub) continue;
     orders.push({
-      orderNo: row[0], createdAt: row[1], itemsSummary: row[7],
-      estimatedTotal: number_(row[9]), depositTotal: number_(row[10]),
-      estimatedBalance: number_(row[11]), status: row[15]
+      orderNo: row[0],
+      createdAt: row[1],
+      itemsSummary: row[7],
+      estimatedTotal: number_(row[9]),
+      depositTotal: number_(row[10]),
+      estimatedBalance: number_(row[11]),
+      status: row[15],
     });
   }
   return json_({ ok: true, orders: orders });
@@ -354,43 +511,87 @@ function handleAdminReadProducts_(data) {
     products: readProducts_(),
     orders: readAdminOrders_(),
     settings: readSettings_(),
-    purchaseSummary: readPurchaseSummary_()
+    purchaseSummary: readPurchaseSummary_(),
   });
 }
 
 function readAdminOrders_() {
   var sheet = spreadsheet_().getSheetByName("Preorders");
   if (!sheet || sheet.getLastRow() < 2) return [];
-  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
+    .getDisplayValues();
   var now = new Date();
-  return rows.filter(function (row) { return String(row[0] || "").trim(); }).map(function (row) {
-    var items = [];
-    try { items = JSON.parse(row[6] || "[]"); } catch (error) { items = []; }
-    var createdAt = parseOrderDate_(row[1]);
-    var status = normalizeOrderStatus_(row[15], row[17]);
-    var ageHours = createdAt ? (now.getTime() - createdAt.getTime()) / 3600000 : 0;
-    var expiresAt = createdAt ? new Date(createdAt.getTime() + ORDER_EXPIRES_DISPLAY_HOURS_ * 3600000) : null;
-    return {
-      orderNo: row[0], createdAt: row[1], lineDisplayName: row[3], customerName: row[4],
-      phone: row[5], items: Array.isArray(items) ? items : [], itemsSummary: row[7],
-      totalQty: number_(row[8]), estimatedTotal: number_(row[9]), depositTotal: number_(row[10]),
-      estimatedBalance: number_(row[11]), paymentMethod: row[12], transferLast5: row[13],
-      note: row[14], status: status, socialProfileId: row[16],
-      shippingStatus: String(row[17] || "").trim() === "已出貨" ? "已出貨" : "未出貨",
-      shippedAt: row[18], reminderSentAt: row[19], cancelledAt: row[20],
-      reminderDue: status === ORDER_STATUS_PENDING_ && ageHours >= ORDER_REMINDER_HOURS_ && ageHours < ORDER_AUTO_CANCEL_HOURS_ && !String(row[19] || "").trim(),
-      reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : ""
-    };
-  }).reverse().slice(0, 300);
+  return rows
+    .filter(function (row) {
+      return String(row[0] || "").trim();
+    })
+    .map(function (row) {
+      var items = [];
+      try {
+        items = JSON.parse(row[6] || "[]");
+      } catch (error) {
+        items = [];
+      }
+      var createdAt = parseOrderDate_(row[1]);
+      var status = normalizeOrderStatus_(row[15], row[17]);
+      var ageHours = createdAt
+        ? (now.getTime() - createdAt.getTime()) / 3600000
+        : 0;
+      var expiresAt = createdAt
+        ? new Date(createdAt.getTime() + ORDER_EXPIRES_DISPLAY_HOURS_ * 3600000)
+        : null;
+      return {
+        orderNo: row[0],
+        createdAt: row[1],
+        lineDisplayName: row[3],
+        customerName: row[4],
+        phone: row[5],
+        items: Array.isArray(items) ? items : [],
+        itemsSummary: row[7],
+        totalQty: number_(row[8]),
+        estimatedTotal: number_(row[9]),
+        depositTotal: number_(row[10]),
+        estimatedBalance: number_(row[11]),
+        paymentMethod: row[12],
+        transferLast5: row[13],
+        note: row[14],
+        status: status,
+        socialProfileId: row[16],
+        shippingStatus:
+          status === ORDER_STATUS_SHIPPED_ ? "已開設賣場" : "未開設賣場",
+        shippedAt: row[18],
+        reminderSentAt: row[19],
+        cancelledAt: row[20],
+        reminderDue:
+          status === ORDER_STATUS_PENDING_ &&
+          ageHours >= ORDER_REMINDER_HOURS_ &&
+          ageHours < ORDER_AUTO_CANCEL_HOURS_ &&
+          !String(row[19] || "").trim(),
+        reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : "",
+      };
+    })
+    .reverse()
+    .slice(0, 300);
 }
 
 function handleAdminUpdateOrderStatus_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var orderNo = String(data.orderNo || "").trim();
   var status = String(data.status || "").trim();
-  var allowed = [ORDER_STATUS_PENDING_, ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_SHIPPED_];
-  if (!orderNo || allowed.indexOf(status) < 0) throw new Error("INVALID_ORDER_STATUS");
+  if (status === ORDER_STATUS_SHIPPED_LEGACY_)
+    status = ORDER_STATUS_SHIPPED_;
+  var allowed = [
+    ORDER_STATUS_PENDING_,
+    ORDER_STATUS_DEPOSIT_RECEIVED_,
+    ORDER_STATUS_SHIPPED_,
+  ];
+  if (!orderNo || allowed.indexOf(status) < 0)
+    throw new Error("INVALID_ORDER_STATUS");
   var lock = LockService.getScriptLock();
+  var orderResult;
+  var notificationTarget;
+  var previousStatus;
   lock.waitLock(10000);
   try {
     setupQuokkaPreorder();
@@ -401,21 +602,196 @@ function handleAdminUpdateOrderStatus_(data) {
     for (var index = 0; index < orderNos.length; index++) {
       if (String(orderNos[index][0] || "").trim() !== orderNo) continue;
       var rowNumber = index + 2;
-      var shippingStatus = status === ORDER_STATUS_SHIPPED_ ? "已出貨" : "未出貨";
-      var shippedAt = status === ORDER_STATUS_SHIPPED_ ? formatDateTime_(new Date()) : "";
+      var row = sheet
+        .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+        .getDisplayValues()[0];
+      previousStatus = normalizeOrderStatus_(row[15], row[17]);
+      var shippingStatus =
+        status === ORDER_STATUS_SHIPPED_ ? "已開設賣場" : "未開設賣場";
+      var shippedAt =
+        status === ORDER_STATUS_SHIPPED_ ? formatDateTime_(new Date()) : "";
       sheet.getRange(rowNumber, 16).setValue(status);
-      sheet.getRange(rowNumber, 18, 1, 2).setValues([[shippingStatus, shippedAt]]);
-      return json_({ ok: true, order: { orderNo: orderNo, status: status, shippingStatus: shippingStatus, shippedAt: shippedAt, reminderDue: false } });
+      sheet
+        .getRange(rowNumber, 18, 1, 2)
+        .setValues([[shippingStatus, shippedAt]]);
+      orderResult = {
+        orderNo: orderNo,
+        status: status,
+        shippingStatus: shippingStatus,
+        shippedAt: shippedAt,
+        reminderDue: false,
+      };
+      notificationTarget = {
+        lineUserId: row[2],
+        orderNo: row[0],
+        customerName: row[4],
+        depositTotal: number_(row[10]),
+      };
+      break;
     }
-    throw new Error("ORDER_NOT_FOUND");
+    if (!orderResult) throw new Error("ORDER_NOT_FOUND");
   } finally {
     lock.releaseLock();
   }
+
+  var shouldNotify =
+    previousStatus !== status &&
+    (status === ORDER_STATUS_DEPOSIT_RECEIVED_ ||
+      status === ORDER_STATUS_SHIPPED_);
+  var notificationSent = false;
+  if (shouldNotify && status === ORDER_STATUS_DEPOSIT_RECEIVED_) {
+    notificationSent = pushLineMessage_(
+      notificationTarget.lineUserId,
+      buildDepositReceivedMessage_(notificationTarget),
+      "deposit received " + orderNo,
+    );
+  }
+  if (shouldNotify && status === ORDER_STATUS_SHIPPED_) {
+    var iopenMallUrl =
+      readSettings_().iopenMallUrl || DEFAULT_SETTINGS_.iopenMallUrl;
+    notificationSent = pushLineMessage_(
+      notificationTarget.lineUserId,
+      buildIopenMallReadyMessage_(notificationTarget, iopenMallUrl),
+      "iopen mall ready " + orderNo,
+    );
+  }
+  orderResult.notificationAttempted = shouldNotify;
+  orderResult.notificationSent = notificationSent;
+  return json_({ ok: true, order: orderResult });
+}
+
+function buildDepositReceivedMessage_(order) {
+  return {
+    type: "flex",
+    altText: "已收到訂金｜" + order.orderNo,
+    contents: {
+      type: "bubble",
+      styles: { header: { backgroundColor: "#47748E" } },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        contents: [
+          {
+            type: "text",
+            text: "已收到訂金",
+            color: "#FFFFFF",
+            weight: "bold",
+            size: "xl",
+          },
+          {
+            type: "text",
+            text: order.orderNo,
+            color: "#DCECF3",
+            size: "sm",
+            margin: "sm",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        backgroundColor: "#F3F9FC",
+        contents: [
+          {
+            type: "text",
+            text: "訂金已確認入帳，您的預訂已完成。",
+            wrap: true,
+            weight: "bold",
+            size: "md",
+            color: "#304B59",
+          },
+          moneyRow_("訂購人", order.customerName || "—"),
+          moneyRow_("已收訂金", "NT$" + formatMoney_(order.depositTotal)),
+        ],
+      },
+    },
+  };
+}
+
+function buildIopenMallReadyMessage_(order, iopenMallUrl) {
+  return {
+    type: "flex",
+    altText: "iOPEN Mall 賣場已開設｜" + order.orderNo,
+    contents: {
+      type: "bubble",
+      styles: {
+        header: { backgroundColor: "#4F9468" },
+        footer: { separator: true, separatorColor: "#DDE9E1" },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        contents: [
+          {
+            type: "text",
+            text: "已開設 iOPEN Mall 賣場",
+            color: "#FFFFFF",
+            weight: "bold",
+            size: "lg",
+          },
+          {
+            type: "text",
+            text: order.orderNo,
+            color: "#E3F2E8",
+            size: "sm",
+            margin: "sm",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        backgroundColor: "#F4FBF6",
+        contents: [
+          {
+            type: "text",
+            text: "請前往下方 iOPEN Mall 網址填寫取貨訂單。",
+            wrap: true,
+            weight: "bold",
+            size: "md",
+            color: "#304B59",
+          },
+          {
+            type: "text",
+            text: iopenMallUrl,
+            wrap: true,
+            size: "xs",
+            margin: "md",
+            color: "#4F7460",
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "14px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#4F9468",
+            action: {
+              type: "uri",
+              label: "前往 iOPEN Mall 填單",
+              uri: iopenMallUrl,
+            },
+          },
+        ],
+      },
+    },
+  };
 }
 
 function handleAdminCancelOrder_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
-  var result = cancelOrder_(String(data.orderNo || "").trim(), "此訂單已由管理員取消。");
+  var result = cancelOrder_(
+    String(data.orderNo || "").trim(),
+    "此訂單已由管理員取消。",
+  );
   return json_({ ok: true, order: result });
 }
 
@@ -432,28 +808,56 @@ function handleAdminSendOrderReminder_(data) {
     var sheet = spreadsheet_().getSheetByName("Preorders");
     var rowNumber = findOrderRow_(sheet, orderNo);
     if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
-    var row = sheet.getRange(rowNumber, 1, 1, ORDER_HEADERS_.length).getDisplayValues()[0];
-    if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_) throw new Error("INVALID_ORDER_STATUS");
+    var row = sheet
+      .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
+    if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_)
+      throw new Error("INVALID_ORDER_STATUS");
     var createdAt = parseOrderDate_(row[1]);
-    var ageMilliseconds = createdAt ? new Date().getTime() - createdAt.getTime() : 0;
-    if (!createdAt || ageMilliseconds < ORDER_REMINDER_HOURS_ * 3600000 || ageMilliseconds >= ORDER_AUTO_CANCEL_HOURS_ * 3600000) throw new Error("REMINDER_NOT_DUE");
+    var ageMilliseconds = createdAt
+      ? new Date().getTime() - createdAt.getTime()
+      : 0;
+    if (
+      !createdAt ||
+      ageMilliseconds < ORDER_REMINDER_HOURS_ * 3600000 ||
+      ageMilliseconds >= ORDER_AUTO_CANCEL_HOURS_ * 3600000
+    )
+      throw new Error("REMINDER_NOT_DUE");
     target = { lineUserId: row[2], orderNo: row[0] };
   } finally {
     lock.releaseLock();
   }
-  if (!pushLineMessage_(target.lineUserId, { type: "text", text: message }, "reminder " + target.orderNo)) throw new Error("LINE_PUSH_FAILED");
+  if (
+    !pushLineMessage_(
+      target.lineUserId,
+      { type: "text", text: message },
+      "reminder " + target.orderNo,
+    )
+  )
+    throw new Error("LINE_PUSH_FAILED");
   sheet = spreadsheet_().getSheetByName("Preorders");
   rowNumber = findOrderRow_(sheet, orderNo);
   var reminderSentAt = formatDateTime_(new Date());
   if (rowNumber) sheet.getRange(rowNumber, 20).setValue(reminderSentAt);
-  return json_({ ok: true, order: { orderNo: orderNo, reminderDue: false, reminderSentAt: reminderSentAt } });
+  return json_({
+    ok: true,
+    order: {
+      orderNo: orderNo,
+      reminderDue: false,
+      reminderSentAt: reminderSentAt,
+    },
+  });
 }
 
 function setupPreorderAutomationTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
-    if (trigger.getHandlerFunction() === "processExpiredPreorders") ScriptApp.deleteTrigger(trigger);
+    if (trigger.getHandlerFunction() === "processExpiredPreorders")
+      ScriptApp.deleteTrigger(trigger);
   });
-  ScriptApp.newTrigger("processExpiredPreorders").timeBased().everyMinutes(15).create();
+  ScriptApp.newTrigger("processExpiredPreorders")
+    .timeBased()
+    .everyMinutes(15)
+    .create();
   return "每 15 分鐘檢查逾期訂單的排程已設定";
 }
 
@@ -461,15 +865,27 @@ function processExpiredPreorders() {
   setupQuokkaPreorder();
   var sheet = spreadsheet_().getSheetByName("Preorders");
   if (!sheet || sheet.getLastRow() < 2) return 0;
-  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
+    .getDisplayValues();
   var now = new Date();
   var expiredOrderNos = [];
   rows.forEach(function (row) {
     var createdAt = parseOrderDate_(row[1]);
-    if (!createdAt || normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_) return;
-    if (now.getTime() - createdAt.getTime() >= ORDER_AUTO_CANCEL_HOURS_ * 3600000) expiredOrderNos.push(String(row[0] || "").trim());
+    if (
+      !createdAt ||
+      normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_
+    )
+      return;
+    if (
+      now.getTime() - createdAt.getTime() >=
+      ORDER_AUTO_CANCEL_HOURS_ * 3600000
+    )
+      expiredOrderNos.push(String(row[0] || "").trim());
   });
-  expiredOrderNos.forEach(function (orderNo) { if (orderNo) cancelOrder_(orderNo, "超過 25 小時未確認收到訂金"); });
+  expiredOrderNos.forEach(function (orderNo) {
+    if (orderNo) cancelOrder_(orderNo, "超過 25 小時未確認收到訂金");
+  });
   return expiredOrderNos.length;
 }
 
@@ -483,27 +899,60 @@ function cancelOrder_(orderNo, reason) {
     var sheet = spreadsheet_().getSheetByName("Preorders");
     var rowNumber = findOrderRow_(sheet, orderNo);
     if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
-    var row = sheet.getRange(rowNumber, 1, 1, ORDER_HEADERS_.length).getDisplayValues()[0];
+    var row = sheet
+      .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
     var currentStatus = normalizeOrderStatus_(row[15], row[17]);
     if (currentStatus === ORDER_STATUS_CANCELLED_) {
-      return { orderNo: orderNo, status: ORDER_STATUS_CANCELLED_, shippingStatus: "未出貨", cancelledAt: row[20], reminderDue: false };
+      return {
+        orderNo: orderNo,
+        status: ORDER_STATUS_CANCELLED_,
+        shippingStatus: "未開設賣場",
+        cancelledAt: row[20],
+        reminderDue: false,
+      };
     }
-    if (String(reason || "").indexOf("25 小時") >= 0 && currentStatus !== ORDER_STATUS_PENDING_) {
-      return { orderNo: orderNo, status: currentStatus, shippingStatus: row[17], shippedAt: row[18], reminderDue: false };
+    if (
+      String(reason || "").indexOf("25 小時") >= 0 &&
+      currentStatus !== ORDER_STATUS_PENDING_
+    ) {
+      return {
+        orderNo: orderNo,
+        status: currentStatus,
+        shippingStatus: row[17],
+        shippedAt: row[18],
+        reminderDue: false,
+      };
     }
     var cancelledAt = formatDateTime_(new Date());
     sheet.getRange(rowNumber, 16).setValue(ORDER_STATUS_CANCELLED_);
-    sheet.getRange(rowNumber, 18, 1, 2).setValues([["未出貨", ""]]);
+    sheet.getRange(rowNumber, 18, 1, 2).setValues([["未開設賣場", ""]]);
     sheet.getRange(rowNumber, 21).setValue(cancelledAt);
     target = {
-      lineUserId: row[2], orderNo: row[0], customerName: row[4],
-      itemsSummary: row[7], depositTotal: number_(row[10]), reason: reason
+      lineUserId: row[2],
+      orderNo: row[0],
+      customerName: row[4],
+      itemsSummary: row[7],
+      depositTotal: number_(row[10]),
+      reason: reason,
     };
   } finally {
     lock.releaseLock();
   }
-  var notificationSent = pushLineMessage_(target.lineUserId, buildOrderCancellationMessage_(target), "order cancellation " + target.orderNo);
-  return { orderNo: orderNo, status: ORDER_STATUS_CANCELLED_, shippingStatus: "未出貨", shippedAt: "", cancelledAt: cancelledAt, reminderDue: false, notificationSent: notificationSent };
+  var notificationSent = pushLineMessage_(
+    target.lineUserId,
+    buildOrderCancellationMessage_(target),
+    "order cancellation " + target.orderNo,
+  );
+  return {
+    orderNo: orderNo,
+    status: ORDER_STATUS_CANCELLED_,
+    shippingStatus: "未開設賣場",
+    shippedAt: "",
+    cancelledAt: cancelledAt,
+    reminderDue: false,
+    notificationSent: notificationSent,
+  };
 }
 
 function buildOrderCancellationMessage_(order) {
@@ -514,36 +963,95 @@ function buildOrderCancellationMessage_(order) {
       type: "bubble",
       styles: { header: { backgroundColor: "#7C858A" } },
       header: {
-        type: "box", layout: "vertical", paddingAll: "18px",
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
         contents: [
-          { type: "text", text: "預購訂單已取消", color: "#FFFFFF", weight: "bold", size: "xl" },
-          { type: "text", text: order.orderNo, color: "#EEF0F1", size: "sm", margin: "sm" }
-        ]
+          {
+            type: "text",
+            text: "預購訂單已取消",
+            color: "#FFFFFF",
+            weight: "bold",
+            size: "xl",
+          },
+          {
+            type: "text",
+            text: order.orderNo,
+            color: "#EEF0F1",
+            size: "sm",
+            margin: "sm",
+          },
+        ],
       },
       body: {
-        type: "box", layout: "vertical", paddingAll: "18px", backgroundColor: "#F5F6F6",
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        backgroundColor: "#F5F6F6",
         contents: [
-          { type: "text", text: order.customerName || "訂購人", weight: "bold", color: "#374047" },
-          { type: "text", text: order.itemsSummary || "", wrap: true, size: "sm", margin: "md", color: "#5E686D" },
+          {
+            type: "text",
+            text: order.customerName || "訂購人",
+            weight: "bold",
+            color: "#374047",
+          },
+          {
+            type: "text",
+            text: order.itemsSummary || "",
+            wrap: true,
+            size: "sm",
+            margin: "md",
+            color: "#5E686D",
+          },
           { type: "separator", margin: "lg", color: "#D8DDDF" },
-          { type: "text", text: String(order.reason || "訂單已由管理員取消。"), wrap: true, size: "sm", margin: "lg", color: "#5E686D" },
-          { type: "text", text: "如有疑問，請直接在 LINE 與小幫手聯絡。", wrap: true, size: "xs", margin: "md", color: "#858E92" }
-        ]
-      }
-    }
+          {
+            type: "text",
+            text: String(order.reason || "訂單已由管理員取消。"),
+            wrap: true,
+            size: "sm",
+            margin: "lg",
+            color: "#5E686D",
+          },
+          {
+            type: "text",
+            text: "如有疑問，請直接在 LINE 與小幫手聯絡。",
+            wrap: true,
+            size: "xs",
+            margin: "md",
+            color: "#858E92",
+          },
+        ],
+      },
+    },
   };
 }
 
 function buildOrderReminderText_(expiresAt) {
-  var expiryText = Utilities.formatDate(expiresAt, Session.getScriptTimeZone(), "yyyy/MM/dd HH:mm");
-  return "溫馨提醒：此預訂訂單將於「" + expiryText + "」過期，記得匯款訂金金額完成訂購喔～^_^\n若您已匯款成功，請回傳帳號後五碼，方便小幫手對帳喔";
+  var expiryText = Utilities.formatDate(
+    expiresAt,
+    Session.getScriptTimeZone(),
+    "yyyy/MM/dd HH:mm",
+  );
+  return (
+    "溫馨提醒：此預訂訂單將於「" +
+    expiryText +
+    "」過期，記得匯款訂金金額完成訂購喔～^_^\n若您已匯款成功，請回傳帳號後五碼，方便小幫手對帳喔"
+  );
 }
 
 function normalizeOrderStatus_(status, shippingStatus) {
   var value = String(status || "").trim();
   if (value === ORDER_STATUS_CANCELLED_) return ORDER_STATUS_CANCELLED_;
-  if (String(shippingStatus || "").trim() === "已出貨" || value === ORDER_STATUS_SHIPPED_) return ORDER_STATUS_SHIPPED_;
-  if (value === ORDER_STATUS_DEPOSIT_RECEIVED_) return ORDER_STATUS_DEPOSIT_RECEIVED_;
+  if (
+    ["已出貨", "已開設賣場"].indexOf(
+      String(shippingStatus || "").trim(),
+    ) >= 0 ||
+    value === ORDER_STATUS_SHIPPED_ ||
+    value === ORDER_STATUS_SHIPPED_LEGACY_
+  )
+    return ORDER_STATUS_SHIPPED_;
+  if (value === ORDER_STATUS_DEPOSIT_RECEIVED_)
+    return ORDER_STATUS_DEPOSIT_RECEIVED_;
   return ORDER_STATUS_PENDING_;
 }
 
@@ -551,13 +1059,22 @@ function parseOrderDate_(value) {
   if (value instanceof Date && !isNaN(value.getTime())) return value;
   var text = String(value || "").trim();
   if (!text) return null;
-  try { return Utilities.parseDate(text, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"); }
-  catch (error) { return null; }
+  try {
+    return Utilities.parseDate(
+      text,
+      Session.getScriptTimeZone(),
+      "yyyy-MM-dd HH:mm:ss",
+    );
+  } catch (error) {
+    return null;
+  }
 }
 
 function findOrderRow_(sheet, orderNo) {
   if (!sheet || sheet.getLastRow() < 2) return 0;
-  var orderNos = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+  var orderNos = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, 1)
+    .getDisplayValues();
   for (var index = 0; index < orderNos.length; index++) {
     if (String(orderNos[index][0] || "").trim() === orderNo) return index + 2;
   }
@@ -568,7 +1085,9 @@ function readPurchaseSummary_() {
   var sheet = spreadsheet_().getSheetByName("Preorders");
   var lastRow = sheet ? sheet.getLastRow() : 0;
   if (lastRow < 2) return { orderCount: 0, totalQty: 0, items: [] };
-  var rows = sheet.getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var rows = sheet
+    .getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length)
+    .getDisplayValues();
   var orderCount = 0;
   var totalQty = 0;
   var grouped = {};
@@ -585,16 +1104,23 @@ function readPurchaseSummary_() {
         var name = String(item.name || "未命名商品").trim();
         var variant = String(item.variant || "").trim();
         var key = productId + "\n" + name + "\n" + variant;
-        if (!grouped[key]) grouped[key] = { name: name, variant: variant, qty: 0 };
+        if (!grouped[key])
+          grouped[key] = { name: name, variant: variant, qty: 0 };
         grouped[key].qty += number_(item.qty);
       });
     } catch (error) {
       console.warn("Invalid itemsJson in order " + String(row[0] || ""));
     }
   });
-  var items = Object.keys(grouped).map(function (key) { return grouped[key]; });
+  var items = Object.keys(grouped).map(function (key) {
+    return grouped[key];
+  });
   items.sort(function (a, b) {
-    return b.qty - a.qty || a.name.localeCompare(b.name) || a.variant.localeCompare(b.variant);
+    return (
+      b.qty - a.qty ||
+      a.name.localeCompare(b.name) ||
+      a.variant.localeCompare(b.variant)
+    );
   });
   return { orderCount: orderCount, totalQty: totalQty, items: items };
 }
@@ -611,15 +1137,30 @@ function handleAdminSaveProduct_(data) {
     var rowNumber = product.id ? findProductRow_(sheet, product.id) : 0;
     if (product.id && !rowNumber) throw new Error("PRODUCT_NOT_FOUND");
     if (!product.id) product.id = "p-" + Utilities.getUuid().slice(0, 12);
-    var createdAt = rowNumber ? sheet.getRange(rowNumber, 10).getDisplayValue() : now;
+    var createdAt = rowNumber
+      ? sheet.getRange(rowNumber, 10).getDisplayValue()
+      : now;
     var row = [
-      product.id, product.name, product.category, product.imageUrl, "",
-      product.variants.join("\n"), product.description, product.active ? "上架" : "下架",
-      product.sortOrder, createdAt, now, product.priceTwd
+      product.id,
+      product.name,
+      product.category,
+      product.imageUrl,
+      "",
+      product.variants.join("\n"),
+      product.description,
+      product.active ? "上架" : "下架",
+      product.sortOrder,
+      createdAt,
+      now,
+      product.priceTwd,
     ];
-    if (rowNumber) sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).setValues([row]);
+    if (rowNumber)
+      sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).setValues([row]);
     else sheet.appendRow(row);
-    return json_({ ok: true, product: rowToProduct_(row, readSettings_().exchangeRate) });
+    return json_({
+      ok: true,
+      product: rowToProduct_(row, readSettings_().exchangeRate),
+    });
   } finally {
     lock.releaseLock();
   }
@@ -628,7 +1169,8 @@ function handleAdminSaveProduct_(data) {
 function handleAdminToggleProduct_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var productId = String(data.productId || "").trim();
-  if (!productId || typeof data.active !== "boolean") throw new Error("INVALID_PRODUCT");
+  if (!productId || typeof data.active !== "boolean")
+    throw new Error("INVALID_PRODUCT");
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -638,8 +1180,13 @@ function handleAdminToggleProduct_(data) {
     if (!rowNumber) throw new Error("PRODUCT_NOT_FOUND");
     sheet.getRange(rowNumber, 8).setValue(data.active ? "上架" : "下架");
     sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
-    var row = sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).getValues()[0];
-    return json_({ ok: true, product: rowToProduct_(row, readSettings_().exchangeRate) });
+    var row = sheet
+      .getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length)
+      .getValues()[0];
+    return json_({
+      ok: true,
+      product: rowToProduct_(row, readSettings_().exchangeRate),
+    });
   } finally {
     lock.releaseLock();
   }
@@ -649,20 +1196,27 @@ function handleAdminUploadProductImage_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var mimeType = String(data.mimeType || "").trim();
   var base64Data = String(data.base64Data || "").trim();
-  if (["image/jpeg", "image/png", "image/webp"].indexOf(mimeType) === -1 || !base64Data) {
+  if (
+    ["image/jpeg", "image/png", "image/webp"].indexOf(mimeType) === -1 ||
+    !base64Data
+  ) {
     throw new Error("INVALID_IMAGE");
   }
   if (base64Data.length > 7 * 1024 * 1024) throw new Error("IMAGE_TOO_LARGE");
   var folder = getOrCreateImageFolder_();
   var safeName = sanitizeFileName_(data.fileName || "product.jpg");
-  var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, safeName);
+  var blob = Utilities.newBlob(
+    Utilities.base64Decode(base64Data),
+    mimeType,
+    safeName,
+  );
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   var fileId = file.getId();
   return json_({
     ok: true,
     fileId: fileId,
-    imageUrl: "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1600"
+    imageUrl: "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1600",
   });
 }
 
@@ -674,17 +1228,21 @@ function handleAdminSaveSettings_(data) {
     exchangeRate: currentSettings.exchangeRate,
     preorderNotice: cleanText_(source.preorderNotice, 300),
     saleClosed: source.saleClosed === true,
-    saleClosedNotice: cleanText_(source.saleClosedNotice, 300) || DEFAULT_SETTINGS_.saleClosedNotice,
+    saleClosedNotice:
+      cleanText_(source.saleClosedNotice, 300) ||
+      DEFAULT_SETTINGS_.saleClosedNotice,
     bankTransferInfo: cleanText_(source.bankTransferInfo, 300),
     bankName: cleanText_(source.bankName, 50),
     bankCode: cleanText_(source.bankCode, 10),
     bankAccount: cleanText_(source.bankAccount, 30),
     bankAccountName: cleanText_(source.bankAccountName, 50),
     bankQrUrl: cleanText_(source.bankQrUrl, 500),
-    iopenMallUrl: cleanText_(source.iopenMallUrl, 500)
+    iopenMallUrl: cleanText_(source.iopenMallUrl, 500),
   };
-  if (settings.bankQrUrl && !/^https:\/\//i.test(settings.bankQrUrl)) throw new Error("INVALID_SETTINGS");
-  if (settings.iopenMallUrl && !/^https:\/\//i.test(settings.iopenMallUrl)) throw new Error("INVALID_SETTINGS");
+  if (settings.bankQrUrl && !/^https:\/\//i.test(settings.bankQrUrl))
+    throw new Error("INVALID_SETTINGS");
+  if (settings.iopenMallUrl && !/^https:\/\//i.test(settings.iopenMallUrl))
+    throw new Error("INVALID_SETTINGS");
 
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -702,9 +1260,12 @@ function handleAdminSaveSettings_(data) {
       ["bankAccount", settings.bankAccount, "匯款帳號"],
       ["bankAccountName", settings.bankAccountName, "匯款戶名"],
       ["bankQrUrl", settings.bankQrUrl, "匯款 QR Code"],
-      ["iopenMallUrl", settings.iopenMallUrl, "iOPEN Mall 網址"]
+      ["iopenMallUrl", settings.iopenMallUrl, "iOPEN Mall 網址"],
     ];
-    if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, SETTING_HEADERS_.length).clearContent();
+    if (sheet.getLastRow() > 1)
+      sheet
+        .getRange(2, 1, sheet.getLastRow() - 1, SETTING_HEADERS_.length)
+        .clearContent();
     sheet.getRange(2, 1, rows.length, SETTING_HEADERS_.length).setValues(rows);
     return json_({ ok: true, settings: readSettings_() });
   } finally {
@@ -713,14 +1274,23 @@ function handleAdminSaveSettings_(data) {
 }
 
 function validatePreorderFields_(data) {
-  if (!data || !Array.isArray(data.items) || !data.items.length) throw new Error("INVALID_ITEMS");
-  if (!String(data.customerName || "").trim() || !String(data.phone || "").trim()) throw new Error("INVALID_CUSTOMER");
+  if (!data || !Array.isArray(data.items) || !data.items.length)
+    throw new Error("INVALID_ITEMS");
+  if (
+    !String(data.customerName || "").trim() ||
+    !String(data.phone || "").trim()
+  )
+    throw new Error("INVALID_CUSTOMER");
 }
 
 function validateProduct_(source) {
   source = source || {};
   var variants = Array.isArray(source.variants) ? source.variants : [];
-  variants = variants.map(function (value) { return cleanText_(value, 50); }).filter(Boolean);
+  variants = variants
+    .map(function (value) {
+      return cleanText_(value, 50);
+    })
+    .filter(Boolean);
   if (variants.length > 30) throw new Error("INVALID_PRODUCT");
   var product = {
     id: String(source.id || "").trim(),
@@ -731,12 +1301,24 @@ function validateProduct_(source) {
     variants: variants,
     description: cleanText_(source.description, 500),
     active: source.active === true,
-    sortOrder: Number(source.sortOrder || 0)
+    sortOrder: Number(source.sortOrder || 0),
   };
-  if (!product.name || !product.category || !product.imageUrl) throw new Error("INVALID_PRODUCT");
-  if (!/^https:\/\//i.test(product.imageUrl)) throw new Error("INVALID_PRODUCT");
-  if (!Number.isInteger(product.priceTwd) || product.priceTwd < 1 || product.priceTwd > 100000000) throw new Error("INVALID_PRODUCT");
-  if (!Number.isInteger(product.sortOrder) || product.sortOrder < 0 || product.sortOrder > 9999) throw new Error("INVALID_PRODUCT");
+  if (!product.name || !product.category || !product.imageUrl)
+    throw new Error("INVALID_PRODUCT");
+  if (!/^https:\/\//i.test(product.imageUrl))
+    throw new Error("INVALID_PRODUCT");
+  if (
+    !Number.isInteger(product.priceTwd) ||
+    product.priceTwd < 1 ||
+    product.priceTwd > 100000000
+  )
+    throw new Error("INVALID_PRODUCT");
+  if (
+    !Number.isInteger(product.sortOrder) ||
+    product.sortOrder < 0 ||
+    product.sortOrder > 9999
+  )
+    throw new Error("INVALID_PRODUCT");
   return product;
 }
 
@@ -744,29 +1326,48 @@ function readProducts_() {
   var sheet = spreadsheet_().getSheetByName("Products");
   if (!sheet || sheet.getLastRow() < 2) return [];
   var legacyExchangeRate = readSettings_().exchangeRate;
-  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, PRODUCT_HEADERS_.length).getValues();
-  return rows.filter(function (row) { return String(row[0] || "").trim(); }).map(function (row) {
-    return rowToProduct_(row, legacyExchangeRate);
-  }).sort(function (a, b) {
-    return a.sortOrder - b.sortOrder || String(b.updatedAt).localeCompare(String(a.updatedAt));
-  });
+  var rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, PRODUCT_HEADERS_.length)
+    .getValues();
+  return rows
+    .filter(function (row) {
+      return String(row[0] || "").trim();
+    })
+    .map(function (row) {
+      return rowToProduct_(row, legacyExchangeRate);
+    })
+    .sort(function (a, b) {
+      return (
+        a.sortOrder - b.sortOrder ||
+        String(b.updatedAt).localeCompare(String(a.updatedAt))
+      );
+    });
 }
 
 function rowToProduct_(row, legacyExchangeRate) {
   var priceTwd = number_(row[11]);
-  if (!priceTwd) priceTwd = Math.round(number_(row[4]) * number_(legacyExchangeRate || DEFAULT_SETTINGS_.exchangeRate));
+  if (!priceTwd)
+    priceTwd = Math.round(
+      number_(row[4]) *
+        number_(legacyExchangeRate || DEFAULT_SETTINGS_.exchangeRate),
+    );
   return {
     id: String(row[0] || "").trim(),
     name: String(row[1] || "").trim(),
     category: String(row[2] || "").trim(),
     imageUrl: String(row[3] || "").trim(),
     priceTwd: priceTwd,
-    variants: String(row[5] || "").split(/\n/).map(function (value) { return value.trim(); }).filter(Boolean),
+    variants: String(row[5] || "")
+      .split(/\n/)
+      .map(function (value) {
+        return value.trim();
+      })
+      .filter(Boolean),
     description: String(row[6] || "").trim(),
     active: String(row[7] || "").trim() === "上架",
     sortOrder: number_(row[8]),
     createdAt: displayDate_(row[9]),
-    updatedAt: displayDate_(row[10])
+    updatedAt: displayDate_(row[10]),
   };
 }
 
@@ -777,22 +1378,38 @@ function readSettings_() {
   var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
   rows.forEach(function (row) {
     var key = String(row[0] || "").trim();
-    if (key === "exchangeRate") settings.exchangeRate = number_(row[1]) || DEFAULT_SETTINGS_.exchangeRate;
-    if (key === "preorderNotice") settings.preorderNotice = String(row[1] || "").trim();
-    if (key === "saleClosed") settings.saleClosed = String(row[1] || "").toLowerCase() === "true";
-    if (key === "saleClosedNotice") settings.saleClosedNotice = String(row[1] || "").trim() || DEFAULT_SETTINGS_.saleClosedNotice;
-    if (key === "bankTransferInfo") settings.bankTransferInfo = String(row[1] || "").trim();
+    if (key === "exchangeRate")
+      settings.exchangeRate = number_(row[1]) || DEFAULT_SETTINGS_.exchangeRate;
+    if (key === "preorderNotice")
+      settings.preorderNotice = String(row[1] || "").trim();
+    if (key === "saleClosed")
+      settings.saleClosed = String(row[1] || "").toLowerCase() === "true";
+    if (key === "saleClosedNotice")
+      settings.saleClosedNotice =
+        String(row[1] || "").trim() || DEFAULT_SETTINGS_.saleClosedNotice;
+    if (key === "bankTransferInfo")
+      settings.bankTransferInfo = String(row[1] || "").trim();
     if (key === "bankName") settings.bankName = String(row[1] || "").trim();
     if (key === "bankCode") settings.bankCode = String(row[1] || "").trim();
-    if (key === "bankAccount") settings.bankAccount = String(row[1] || "").trim();
-    if (key === "bankAccountName") settings.bankAccountName = String(row[1] || "").trim();
+    if (key === "bankAccount")
+      settings.bankAccount = String(row[1] || "").trim();
+    if (key === "bankAccountName")
+      settings.bankAccountName = String(row[1] || "").trim();
     if (key === "bankQrUrl") settings.bankQrUrl = String(row[1] || "").trim();
-    if (key === "iopenMallUrl") settings.iopenMallUrl = String(row[1] || "").trim();
+    if (key === "iopenMallUrl")
+      settings.iopenMallUrl =
+        String(row[1] || "").trim() || DEFAULT_SETTINGS_.iopenMallUrl;
   });
-  if (settings.preorderNotice === "商品下訂後才會採購。代購費為商品費用外加；若韓國現場缺貨，該商品代購費將全額退回。") {
+  if (
+    settings.preorderNotice ===
+    "商品下訂後才會採購。代購費為商品費用外加；若韓國現場缺貨，該商品代購費將全額退回。"
+  ) {
     settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
   }
-  if (settings.preorderNotice === "商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。") {
+  if (
+    settings.preorderNotice ===
+    "商品下訂後才會採購。下單先付商品預估總額的 50% 訂金，回國後再支付剩餘商品款。"
+  ) {
     settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
   }
   return settings;
@@ -800,12 +1417,23 @@ function readSettings_() {
 
 function requireAdmin_(idToken, adminSessionToken) {
   var token = String(adminSessionToken || "").trim();
-  if (token && CacheService.getScriptCache().get("admin-session-" + token) === "1") {
+  if (
+    token &&
+    CacheService.getScriptCache().get("admin-session-" + token) === "1"
+  ) {
     return { sub: "access-code-admin", name: "Admin" };
   }
   var profile = verifyLineIdToken_(idToken);
-  var rawIds = PropertiesService.getScriptProperties().getProperty("ADMIN_LINE_USER_IDS") || "";
-  var ids = rawIds.split(",").map(function (value) { return value.trim(); }).filter(Boolean);
+  var rawIds =
+    PropertiesService.getScriptProperties().getProperty(
+      "ADMIN_LINE_USER_IDS",
+    ) || "";
+  var ids = rawIds
+    .split(",")
+    .map(function (value) {
+      return value.trim();
+    })
+    .filter(Boolean);
   if (!ids.length) throw new Error("ADMIN_CONFIG_MISSING");
   if (ids.indexOf(profile.sub) === -1) throw new Error("ADMIN_FORBIDDEN");
   return profile;
@@ -814,7 +1442,8 @@ function requireAdmin_(idToken, adminSessionToken) {
 function verifyLineIdToken_(idToken) {
   idToken = String(idToken || "").trim();
   if (!idToken) throw new Error("LINE_LOGIN_REQUIRED");
-  var channelId = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ID");
+  var channelId =
+    PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ID");
   if (!channelId) throw new Error("LINE_CONFIG_MISSING");
   var cache = CacheService.getScriptCache();
   var cacheKey = "line-" + sha256_(idToken).slice(0, 32);
@@ -823,17 +1452,23 @@ function verifyLineIdToken_(idToken) {
   var response = UrlFetchApp.fetch("https://api.line.me/oauth2/v2.1/verify", {
     method: "post",
     payload: { id_token: idToken, client_id: channelId },
-    muteHttpExceptions: true
+    muteHttpExceptions: true,
   });
   if (response.getResponseCode() !== 200) throw new Error("LINE_TOKEN_INVALID");
   var profile = JSON.parse(response.getContentText());
-  if (!profile.sub || String(profile.aud) !== String(channelId)) throw new Error("LINE_TOKEN_INVALID");
-  cache.put(cacheKey, JSON.stringify({ sub: profile.sub, name: profile.name || "" }), 300);
+  if (!profile.sub || String(profile.aud) !== String(channelId))
+    throw new Error("LINE_TOKEN_INVALID");
+  cache.put(
+    cacheKey,
+    JSON.stringify({ sub: profile.sub, name: profile.name || "" }),
+    300,
+  );
   return { sub: profile.sub, name: profile.name || "" };
 }
 
 function spreadsheet_() {
-  var id = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  var id =
+    PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
   if (id) return SpreadsheetApp.openById(id);
   var active = SpreadsheetApp.getActiveSpreadsheet();
   if (!active) throw new Error("SPREADSHEET_CONFIG_MISSING");
@@ -843,11 +1478,13 @@ function spreadsheet_() {
 function ensureSheet_(ss, name, headers) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
-  if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (sheet.getLastRow() === 0)
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   var actual = sheet.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
   headers.forEach(function (header, index) {
     if (!actual[index]) sheet.getRange(1, index + 1).setValue(header);
-    else if (actual[index] !== header) throw new Error(name.toUpperCase() + "_HEADER_MISMATCH");
+    else if (actual[index] !== header)
+      throw new Error(name.toUpperCase() + "_HEADER_MISMATCH");
   });
   sheet.setFrozenRows(1);
   return sheet;
@@ -867,7 +1504,7 @@ function ensureSettingsSheet_(ss) {
       ["bankAccount", "", "匯款帳號"],
       ["bankAccountName", "", "匯款戶名"],
       ["bankQrUrl", "", "匯款 QR Code"],
-      ["iopenMallUrl", "", "iOPEN Mall 網址"]
+      ["iopenMallUrl", "", "iOPEN Mall 網址"],
     ]);
   }
   return sheet;
@@ -876,38 +1513,102 @@ function ensureSettingsSheet_(ss) {
 function findProductRow_(sheet, productId) {
   if (sheet.getLastRow() < 2) return 0;
   var ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
-  for (var index = 0; index < ids.length; index++) if (ids[index][0] === productId) return index + 2;
+  for (var index = 0; index < ids.length; index++)
+    if (ids[index][0] === productId) return index + 2;
   return 0;
 }
 
 function getOrCreateImageFolder_() {
   var folders = DriveApp.getFoldersByName(PRODUCT_IMAGE_FOLDER_);
-  return folders.hasNext() ? folders.next() : DriveApp.createFolder(PRODUCT_IMAGE_FOLDER_);
+  return folders.hasNext()
+    ? folders.next()
+    : DriveApp.createFolder(PRODUCT_IMAGE_FOLDER_);
 }
 
 function sanitizeFileName_(value) {
-  var name = String(value || "product.jpg").replace(/[\\/:*?"<>|#%{}~&]/g, "-").slice(0, 80) || "product.jpg";
-  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd-HHmmss-") + name;
+  var name =
+    String(value || "product.jpg")
+      .replace(/[\\/:*?"<>|#%{}~&]/g, "-")
+      .slice(0, 80) || "product.jpg";
+  return (
+    Utilities.formatDate(
+      new Date(),
+      Session.getScriptTimeZone(),
+      "yyyyMMdd-HHmmss-",
+    ) + name
+  );
 }
 
 function createOrderNo_(date) {
-  return "QK" + Utilities.formatDate(date, Session.getScriptTimeZone(), "yyMMdd") + "-" + Utilities.getUuid().replace(/-/g, "").slice(0, 6).toUpperCase();
+  return (
+    "QK" +
+    Utilities.formatDate(date, Session.getScriptTimeZone(), "yyMMdd") +
+    "-" +
+    Utilities.getUuid().replace(/-/g, "").slice(0, 6).toUpperCase()
+  );
 }
 
-function cleanText_(value, maxLength) { return String(value || "").trim().slice(0, maxLength); }
-function number_(value) { var number = Number(String(value || 0).replace(/,/g, "")); return Number.isFinite(number) ? number : 0; }
-function formatDateTime_(date) { return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"); }
-function displayDate_(value) { return value instanceof Date ? formatDateTime_(value) : String(value || "").trim(); }
-function sha256_(value) { return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value).map(function (byte) { var v = byte < 0 ? byte + 256 : byte; return ("0" + v.toString(16)).slice(-2); }).join(""); }
-function json_(payload) { return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON); }
+function cleanText_(value, maxLength) {
+  return String(value || "")
+    .trim()
+    .slice(0, maxLength);
+}
+function number_(value) {
+  var number = Number(String(value || 0).replace(/,/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+function formatDateTime_(date) {
+  return Utilities.formatDate(
+    date,
+    Session.getScriptTimeZone(),
+    "yyyy-MM-dd HH:mm:ss",
+  );
+}
+function displayDate_(value) {
+  return value instanceof Date
+    ? formatDateTime_(value)
+    : String(value || "").trim();
+}
+function sha256_(value) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value)
+    .map(function (byte) {
+      var v = byte < 0 ? byte + 256 : byte;
+      return ("0" + v.toString(16)).slice(-2);
+    })
+    .join("");
+}
+function json_(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(
+    ContentService.MimeType.JSON,
+  );
+}
 function safeError_(error) {
-  var message = String(error && error.message || error || "UNKNOWN_ERROR");
+  var message = String((error && error.message) || error || "UNKNOWN_ERROR");
   var allowed = [
-    "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "ADMIN_ACCESS_CODE_MISSING", "ADMIN_LOGIN_FAILED", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
-    "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
-    "ORDER_NOT_FOUND", "ORDER_FORBIDDEN", "INVALID_ORDER_STATUS", "INVALID_REMINDER", "REMINDER_NOT_DUE", "LINE_PUSH_FAILED",
-    "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
-    "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING", "SALE_CLOSED"
+    "ADMIN_FORBIDDEN",
+    "ADMIN_CONFIG_MISSING",
+    "ADMIN_ACCESS_CODE_MISSING",
+    "ADMIN_LOGIN_FAILED",
+    "LINE_LOGIN_REQUIRED",
+    "LINE_CONFIG_MISSING",
+    "LINE_TOKEN_INVALID",
+    "INVALID_ITEMS",
+    "INVALID_CUSTOMER",
+    "INVALID_TRANSFER_LAST5",
+    "ORDER_NOT_FOUND",
+    "ORDER_FORBIDDEN",
+    "INVALID_ORDER_STATUS",
+    "INVALID_REMINDER",
+    "REMINDER_NOT_DUE",
+    "LINE_PUSH_FAILED",
+    "INVALID_PRODUCT",
+    "PRODUCT_CHANGED",
+    "PRODUCT_NOT_FOUND",
+    "INVALID_IMAGE",
+    "IMAGE_TOO_LARGE",
+    "INVALID_SETTINGS",
+    "SPREADSHEET_CONFIG_MISSING",
+    "SALE_CLOSED",
   ];
   return allowed.indexOf(message) >= 0 ? message : "SERVER_ERROR";
 }

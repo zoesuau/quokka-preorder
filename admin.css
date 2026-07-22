@@ -34,7 +34,7 @@
 .purchase-item-list b { flex: none; color: var(--peach-dark); }
 .admin-orders-section { margin: 14px 0; padding: 16px; border-radius: 18px; background: rgba(255,255,255,.82); box-shadow: 0 7px 22px rgba(38,76,96,.1); }
 .order-admin-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 9px; margin: 14px 0; }
-.order-admin-toolbar select { padding: 0 10px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.order-admin-toolbar select { width: min(48vw, 230px); min-width: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 12px; background: white; }
 .admin-order-list { display: grid; gap: 12px; }
 .admin-order-card { overflow: hidden; border: 2px solid transparent; border-radius: 17px; box-shadow: 0 5px 14px rgba(38,76,96,.08); }
 .admin-order-card.pending { border-color: #ef9db2; background: #fff0f4; }

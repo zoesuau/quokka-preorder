@@ -1,4 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
+const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
 const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
@@ -148,20 +149,26 @@ function renderPurchaseSummary() {
 function renderAdminOrders() {
   const search = document.getElementById("orderSearch").value.trim().toLowerCase();
   const filter = document.getElementById("orderStatusFilter").value;
-  const pending = adminState.orders.filter((order) => order.status === "待收訂金").length;
+  const pending = adminState.orders.filter((order) => normalizeAdminOrderStatus(order.status) === "待收訂金").length;
   document.getElementById("unshippedCount").textContent = `${formatNumber(pending)} 筆待收訂金`;
   const orders = adminState.orders.filter((order) => {
-    if (filter === "active" && order.status === "已取消") return false;
-    if (!["active", "all"].includes(filter) && order.status !== filter) return false;
+    const status = normalizeAdminOrderStatus(order.status);
+    if (filter === "active" && status === "已取消") return false;
+    if (!["active", "all"].includes(filter) && status !== filter) return false;
     const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName}`.toLowerCase();
     return !search || haystack.includes(search);
   });
   document.getElementById("adminOrderList").innerHTML = orders.length ? orders.map(renderAdminOrderCard).join("") : `<div class="empty-orders">沒有符合條件的訂單。</div>`;
 }
 
+function normalizeAdminOrderStatus(status) {
+  return status === "已出貨" ? IOPEN_MALL_READY_STATUS : status;
+}
+
 function renderAdminOrderCard(order) {
-  const status = ["待收訂金", "已收到訂金", "已出貨", "已取消"].includes(order.status) ? order.status : "待收訂金";
-  const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", "已出貨": "shipped", "已取消": "cancelled" }[status];
+  const normalizedStatus = normalizeAdminOrderStatus(order.status);
+  const status = ["待收訂金", "已收到訂金", IOPEN_MALL_READY_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
+  const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", "已取消": "cancelled" }[status];
   const items = Array.isArray(order.items) ? order.items : [];
   return `<article class="admin-order-card ${statusClass}" data-order-card="${escapeAttr(order.orderNo)}">
     <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><b>${formatNumber(order.totalQty)} 件</b></header>
@@ -172,12 +179,12 @@ function renderAdminOrderCard(order) {
       <div><dt>金額</dt><dd>商品款 NT$${formatNumber(order.estimatedTotal)}／訂金 50% NT$${formatNumber(order.depositTotal)}／剩餘商品款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
       <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
       ${order.transferLast5 ? `<div><dt>匯款後五碼</dt><dd>${escapeHtml(order.transferLast5)}</dd></div>` : ""}
-      ${status === "已出貨" && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
+      ${status === IOPEN_MALL_READY_STATUS && order.shippedAt ? `<div><dt>賣場開設時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
       ${status === "已取消" && order.cancelledAt ? `<div><dt>取消時間</dt><dd>${escapeHtml(order.cancelledAt)}</dd></div>` : ""}
     </dl>
     ${order.reminderDue ? `<div class="order-reminder"><label>12 小時未收到訂金提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
     <div class="order-status-actions">
-      <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="已出貨" ${status === "已出貨" ? "selected" : ""}>已出貨</option></select></label>
+      <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option></select></label>
       <button class="cancel-order-action" type="button" data-cancel-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}>${status === "已取消" ? "訂單已取消" : "取消訂單"}</button>
     </div>
   </article>`;
@@ -208,7 +215,7 @@ async function handleOrderAction(event) {
 async function handleOrderStatusChange(event) {
   const select = event.target.closest("[data-status-order]");
   if (!select) return;
-  const previous = adminState.orders.find((order) => order.orderNo === select.dataset.statusOrder)?.status || "待收訂金";
+  const previous = normalizeAdminOrderStatus(adminState.orders.find((order) => order.orderNo === select.dataset.statusOrder)?.status || "待收訂金");
   select.disabled = true;
   try {
     const result = await adminPost({ action: "adminUpdateOrderStatus", orderNo: select.dataset.statusOrder, status: select.value });
@@ -216,7 +223,15 @@ async function handleOrderStatusChange(event) {
     const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
     if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
     renderAdminOrders();
-    showToast(`訂單已改為「${result.order.status}」`);
+    if (result.order.notificationAttempted) {
+      showToast(result.order.notificationSent
+        ? `訂單已改為「${result.order.status}」並發送通知`
+        : `訂單已改為「${result.order.status}」，但 LINE 通知未送達`);
+    } else {
+      showToast(previous === result.order.status
+        ? `訂單原本就是「${result.order.status}」，未重複發送通知`
+        : `訂單已改為「${result.order.status}」`);
+    }
   } catch (error) {
     select.value = previous;
     select.disabled = false;

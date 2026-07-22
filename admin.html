@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260722-order-status" />
+    <link rel="stylesheet" href="admin.css?v=20260722-status-notify" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260722-order-status" defer></script>
+    <script src="admin.js?v=20260722-status-notify" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -52,7 +52,7 @@
         <div class="purchase-summary-heading"><div><p class="eyebrow">ORDER PACKING</p><h2>訂單與包貨</h2></div><span id="unshippedCount">0 筆待收訂金</span></div>
         <div class="order-admin-toolbar">
           <label class="admin-search"><span>搜尋</span><input id="orderSearch" type="search" placeholder="訂單、姓名或電話" /></label>
-          <select id="orderStatusFilter" aria-label="訂單狀態"><option value="active">進行中</option><option value="待收訂金">待收訂金</option><option value="已收到訂金">已收到訂金</option><option value="已出貨">已出貨</option><option value="已取消">已取消</option><option value="all">全部訂單</option></select>
+          <select id="orderStatusFilter" aria-label="訂單狀態"><option value="active">進行中</option><option value="待收訂金">待收訂金</option><option value="已收到訂金">已收到訂金</option><option value="已開設 iOPEN Mall 賣場">已開設 iOPEN Mall 賣場</option><option value="已取消">已取消</option><option value="all">全部訂單</option></select>
         </div>
         <div class="admin-order-list" id="adminOrderList"></div>
       </section>
