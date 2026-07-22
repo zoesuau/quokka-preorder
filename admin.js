@@ -318,7 +318,7 @@ function fillSettings() {
   document.getElementById("bankAccountName").value = adminState.settings.bankAccountName || "";
   document.getElementById("bankQrUrl").value = adminState.settings.bankQrUrl || "";
   document.getElementById("bankQrPreview").src = adminState.settings.bankQrUrl || demoPlaceholder;
-  document.getElementById("bankQrHint").textContent = adminState.settings.bankQrUrl ? "點一下更換 QR Code" : "上傳匯款 QR Code（選填）";
+  document.getElementById("bankQrHint").textContent = adminState.settings.bankQrUrl ? "點一下更換 QR Code（小卡不顯示）" : "上傳匯款 QR Code（小卡不顯示）";
   document.getElementById("iopenMallUrl").value = adminState.settings.iopenMallUrl || "";
   updateAdminPricePreview();
 }
@@ -357,7 +357,7 @@ async function uploadBankQr(event) {
     if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
     document.getElementById("bankQrUrl").value = result.imageUrl;
     document.getElementById("bankQrPreview").src = result.imageUrl;
-    document.getElementById("bankQrHint").textContent = "點一下更換 QR Code";
+    document.getElementById("bankQrHint").textContent = "點一下更換 QR Code（小卡不顯示）";
     showToast("QR Code 上傳完成，記得儲存設定");
   } catch (error) {
     showToast("QR Code 上傳失敗，請換一張再試");

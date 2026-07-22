@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="admin.css?v=20260718-pages" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260719-twd-price" defer></script>
+    <script src="admin.js?v=20260722-transfer-button" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -78,10 +78,10 @@
           </div>
           <label class="field"><span>匯款帳號</span><input id="bankAccount" maxlength="30" inputmode="numeric" placeholder="輸入完整帳號" /></label>
           <label class="field"><span>戶名</span><input id="bankAccountName" maxlength="50" /></label>
-          <label class="field"><span>小卡補充說明</span><textarea id="bankTransferInfoSetting" rows="2" maxlength="300" placeholder="例如：匯款後請在 LINE 回報後五碼"></textarea></label>
+          <label class="field"><span>匯款補充說明（小卡不顯示）</span><textarea id="bankTransferInfoSetting" rows="2" maxlength="300" placeholder="例如：匯款後請在 LINE 回報後五碼"></textarea></label>
           <label class="bank-qr-uploader" for="bankQrInput">
             <img id="bankQrPreview" alt="匯款 QR Code 預覽" />
-            <span id="bankQrHint">上傳匯款 QR Code（選填）</span>
+            <span id="bankQrHint">上傳匯款 QR Code（小卡不顯示）</span>
             <input id="bankQrInput" type="file" accept="image/jpeg,image/png,image/webp" />
           </label>
           <input id="bankQrUrl" type="hidden" />

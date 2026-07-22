@@ -101,7 +101,6 @@ function handleCreatePreorder_(data) {
   lock.waitLock(20000);
   try {
     setupQuokkaPreorder();
-    var settings = readSettings_();
     validatePreorderFields_(data);
     var catalog = readProducts_();
     var productMap = {};
@@ -171,9 +170,7 @@ function handleCreatePreorder_(data) {
       totalQty: totalQty,
       estimatedTotal: estimatedTotal,
       depositTotal: depositTotal,
-      estimatedBalance: estimatedBalance,
-      bankTransferInfo: composeBankTransferInfo_(settings),
-      bankQrUrl: settings.bankQrUrl
+      estimatedBalance: estimatedBalance
     };
   } finally {
     lock.releaseLock();
@@ -215,7 +212,7 @@ function pushOrderSuccessCard_(lineUserId, order) {
 }
 
 function buildOrderSuccessMessage_(order) {
-  var transferInfo = String(order.bankTransferInfo || "").trim() || "請直接在 LINE 對話中向鼠購易確認匯款帳戶。";
+  var transferRequestText = "您好，我想索取匯款資訊\n訂單編號：" + order.orderNo + "\n收件人姓名：" + order.customerName;
   var reportText = "您好，我要回報匯款\n訂單編號：" + order.orderNo + "\n收件人姓名：" + order.customerName + "\n匯款後三碼：";
   var reportUrl = "https://line.me/R/oaMessage/%40527tnlnn/?" + encodeURIComponent(reportText);
   var bodyContents = [
@@ -226,13 +223,9 @@ function buildOrderSuccessMessage_(order) {
     moneyRow_("本次訂金（50%）", "NT$" + formatMoney_(order.depositTotal), "#EF0025"),
     moneyRow_("回國後剩餘商品款", "NT$" + formatMoney_(order.estimatedBalance)),
     { type: "separator", margin: "lg", color: "#E6DED5" },
-    { type: "text", text: "匯款帳戶", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
-    { type: "text", text: transferInfo, wrap: true, size: "sm", margin: "sm", color: "#304B59" }
+    { type: "text", text: "需要匯款嗎？", weight: "bold", size: "sm", margin: "lg", color: "#304B59" },
+    { type: "text", text: "請按下方「匯款資訊」，系統會送出文字訊息，由管理方提供帳戶。", wrap: true, size: "xs", margin: "sm", color: "#75858D" }
   ];
-  if (/^https:\/\//i.test(String(order.bankQrUrl || ""))) {
-    bodyContents.push({ type: "image", url: order.bankQrUrl, size: "full", aspectMode: "fit", aspectRatio: "1:1", margin: "lg" });
-  }
-  bodyContents.push({ type: "text", text: "匯款完成後，請按下方按鈕人工回報。", wrap: true, size: "xs", margin: "md", color: "#75858D" });
   return {
       type: "flex",
       altText: "訂單已成立｜" + order.orderNo + "｜應付訂金 NT$" + formatMoney_(order.depositTotal),
@@ -254,11 +247,17 @@ function buildOrderSuccessMessage_(order) {
           contents: bodyContents
         },
         footer: {
-          type: "box", layout: "vertical", paddingAll: "14px",
-          contents: [{
-            type: "button", style: "primary", color: "#EF0025", height: "sm",
-            action: { type: "uri", label: "開啟 LINE 對話回報", uri: reportUrl }
-          }]
+          type: "box", layout: "vertical", paddingAll: "14px", spacing: "sm",
+          contents: [
+            {
+              type: "button", style: "primary", color: "#47748E", height: "sm",
+              action: { type: "message", label: "匯款資訊", text: transferRequestText }
+            },
+            {
+              type: "button", style: "secondary", height: "sm",
+              action: { type: "uri", label: "已匯款，前往回報", uri: reportUrl }
+            }
+          ]
         }
       }
     };
@@ -610,15 +609,6 @@ function readSettings_() {
     settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
   }
   return settings;
-}
-
-function composeBankTransferInfo_(settings) {
-  var lines = [];
-  if (settings.bankName || settings.bankCode) lines.push((settings.bankName || "銀行") + (settings.bankCode ? "（" + settings.bankCode + "）" : ""));
-  if (settings.bankAccount) lines.push("帳號：" + settings.bankAccount);
-  if (settings.bankAccountName) lines.push("戶名：" + settings.bankAccountName);
-  if (settings.bankTransferInfo) lines.push(settings.bankTransferInfo);
-  return lines.join("\n");
 }
 
 function requireAdmin_(idToken, adminSessionToken) {

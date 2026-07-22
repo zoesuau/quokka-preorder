@@ -213,7 +213,7 @@ async function submitOrder(event) {
     document.getElementById("checkoutDialog").close();
     document.getElementById("orderForm").reset();
     alert(result.botMessageSent
-      ? `訂單已成立！\n訂單編號：${result.orderNo}\n匯款資訊已傳送到鼠購易 LINE 對話。`
+      ? `訂單已成立！\n訂單編號：${result.orderNo}\n訂單小卡已傳送到鼠購易 LINE 對話；如需匯款，請按小卡下方的「匯款資訊」。`
       : `訂單已成立！\n訂單編號：${result.orderNo}\n小卡暫時未送達，請直接聯絡鼠購易確認匯款資訊。`);
     await showMyOrders();
   } catch (error) {
