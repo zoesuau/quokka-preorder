@@ -1,4 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
+window.QUOKKA_APP_VERSION = "20260722-line-runtime";
 const state = {
   products: [],
   settings: { preorderNotice: "", bankTransferInfo: "", saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
@@ -51,16 +52,17 @@ function bindEvents() {
 
 async function initLine() {
   if (!CONFIG.liffId) return;
-  if (typeof liff === "undefined") throw new Error("LIFF_SDK_UNAVAILABLE");
-  await liff.init({ liffId: CONFIG.liffId });
-  if (!liff.isLoggedIn()) {
-    liff.login({ redirectUri: getLiffRedirectUri() });
+  const lineRuntime = window.QuokkaLineRuntime;
+  if (!lineRuntime) throw new Error("LIFF_SDK_UNAVAILABLE");
+  await lineRuntime.init({ liffId: CONFIG.liffId });
+  if (!lineRuntime.isLoggedIn()) {
+    lineRuntime.login({ redirectUri: getLiffRedirectUri() });
     return;
   }
-  state.line.idToken = liff.getIDToken() || "";
+  state.line.idToken = lineRuntime.getIDToken() || "";
   cleanLiffCallbackParams();
   try {
-    const profile = await liff.getProfile();
+    const profile = await lineRuntime.getProfile();
     state.line.userId = profile.userId || "";
     state.line.displayName = profile.displayName || "";
   } catch (error) {
