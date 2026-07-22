@@ -37,11 +37,15 @@
 .order-admin-toolbar select { padding: 0 10px; border: 1px solid var(--line); border-radius: 12px; background: white; }
 .admin-order-list { display: grid; gap: 12px; }
 .admin-order-card { overflow: hidden; border: 2px solid transparent; border-radius: 17px; box-shadow: 0 5px 14px rgba(38,76,96,.08); }
-.admin-order-card.unshipped { border-color: #ef9db2; background: #fff0f4; }
-.admin-order-card.shipped { border-color: #79abc4; background: #e7f4fa; }
+.admin-order-card.pending { border-color: #ef9db2; background: #fff0f4; }
+.admin-order-card.deposit-received { border-color: #6eadd1; background: #e9f5fc; }
+.admin-order-card.shipped { border-color: #72ad88; background: #eaf6ee; }
+.admin-order-card.cancelled { border-color: #a9b0b4; background: #f0f1f2; }
 .admin-order-card header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; color: white; }
-.admin-order-card.unshipped header { background: #e77694; }
-.admin-order-card.shipped header { background: #47748e; }
+.admin-order-card.pending header { background: #e77694; }
+.admin-order-card.deposit-received header { background: #438ab4; }
+.admin-order-card.shipped header { background: #4f9468; }
+.admin-order-card.cancelled header { background: #7c858a; }
 .admin-order-card header > div { min-width: 0; }
 .admin-order-card header span { font-size: .67rem; font-weight: 700; letter-spacing: .08em; }
 .admin-order-card header h3 { margin: 1px 0; font-size: .98rem; }
@@ -57,9 +61,16 @@
 .customer-details > div { display: grid; grid-template-columns: 58px 1fr; gap: 8px; }
 .customer-details dt { color: var(--muted); }
 .customer-details dd { margin: 0; overflow-wrap: anywhere; }
-.shipping-action { width: calc(100% - 28px); margin: 0 14px 14px; padding: 10px; border: 0; border-radius: 10px; color: white; font-weight: 700; }
-.unshipped .shipping-action { background: #e24f76; }
-.shipped .shipping-action { background: #47748e; }
+.order-status-actions { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 9px; padding: 0 14px 14px; }
+.order-status-actions label { display: grid; gap: 4px; color: var(--muted); font-size: .68rem; font-weight: 700; }
+.order-status-actions select, .cancel-order-action { min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; font-weight: 700; }
+.cancel-order-action { align-self: end; border-color: #a9b0b4; background: #7c858a; color: white; }
+.cancel-order-action:disabled { opacity: .62; }
+.order-reminder { display: grid; gap: 8px; margin: 0 14px 12px; padding: 11px; border: 1px solid #e5b85c; border-radius: 12px; background: #fff8df; }
+.order-reminder label { display: grid; gap: 6px; color: #765716; font-size: .72rem; font-weight: 700; }
+.order-reminder textarea { width: 100%; padding: 9px; resize: vertical; border: 1px solid #dfc478; border-radius: 9px; background: white; font: inherit; line-height: 1.55; }
+.order-reminder button { padding: 9px; border: 0; border-radius: 9px; background: #b98219; color: white; font-weight: 700; }
+.reminder-sent { margin: 0 14px 12px; color: var(--muted); font-size: .7rem; }
 .empty-orders { padding: 24px 10px; color: var(--muted); font-size: .78rem; text-align: center; }
 .settings-card { margin: 14px 0; padding: 0 15px; border: 1px solid var(--line); border-radius: 16px; background: white; }
 .settings-card summary { padding: 15px 0; font-weight: 700; cursor: pointer; }

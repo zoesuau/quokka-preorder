@@ -17,8 +17,17 @@ var ORDER_HEADERS_ = [
   "orderNo", "createdAt", "lineUserId", "lineDisplayName", "customerName",
   "phone", "itemsJson", "itemsSummary", "totalQty", "estimatedTotal",
   "depositTotal", "estimatedBalance", "paymentMethod", "transferLast5",
-  "note", "status", "socialProfileId", "shippingStatus", "shippedAt"
+  "note", "status", "socialProfileId", "shippingStatus", "shippedAt",
+  "reminderSentAt", "cancelledAt"
 ];
+
+var ORDER_STATUS_PENDING_ = "待收訂金";
+var ORDER_STATUS_DEPOSIT_RECEIVED_ = "已收到訂金";
+var ORDER_STATUS_SHIPPED_ = "已出貨";
+var ORDER_STATUS_CANCELLED_ = "已取消";
+var ORDER_REMINDER_HOURS_ = 12;
+var ORDER_EXPIRES_DISPLAY_HOURS_ = 24;
+var ORDER_AUTO_CANCEL_HOURS_ = 25;
 
 var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
@@ -52,7 +61,9 @@ function doPost(e) {
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
     if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
-    if (action === "adminToggleOrderShipping") return handleAdminToggleOrderShipping_(data);
+    if (action === "adminUpdateOrderStatus") return handleAdminUpdateOrderStatus_(data);
+    if (action === "adminCancelOrder") return handleAdminCancelOrder_(data);
+    if (action === "adminSendOrderReminder") return handleAdminSendOrderReminder_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
     if (action === "adminUploadProductImage") return handleAdminUploadProductImage_(data);
@@ -162,9 +173,11 @@ function handleCreatePreorder_(data) {
       "",
       "",
       cleanText_(data.note, 300),
-      "待人工確認",
+      ORDER_STATUS_PENDING_,
       "",
       "未出貨",
+      "",
+      "",
       ""
     ]);
     orderResult = {
@@ -191,9 +204,12 @@ function handleCreatePreorder_(data) {
 }
 
 function pushOrderSuccessCard_(lineUserId, order) {
+  return pushLineMessage_(lineUserId, buildOrderSuccessMessage_(order), "order success " + order.orderNo);
+}
+
+function pushLineMessage_(lineUserId, message, logLabel) {
   var accessToken = PropertiesService.getScriptProperties().getProperty("LINE_MESSAGING_ACCESS_TOKEN") || "";
   if (!accessToken || !lineUserId) return false;
-  var message = buildOrderSuccessMessage_(order);
   var payload = { to: lineUserId, messages: [message] };
   try {
     var response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
@@ -205,7 +221,7 @@ function pushOrderSuccessCard_(lineUserId, order) {
     });
     var code = response.getResponseCode();
     if (code >= 200 && code < 300) {
-      console.log("LINE push sent: " + order.orderNo);
+      console.log("LINE push sent: " + String(logLabel || "message"));
       return true;
     }
     console.error("LINE push failed: " + code + " " + response.getContentText());
@@ -346,25 +362,34 @@ function readAdminOrders_() {
   var sheet = spreadsheet_().getSheetByName("Preorders");
   if (!sheet || sheet.getLastRow() < 2) return [];
   var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var now = new Date();
   return rows.filter(function (row) { return String(row[0] || "").trim(); }).map(function (row) {
     var items = [];
     try { items = JSON.parse(row[6] || "[]"); } catch (error) { items = []; }
+    var createdAt = parseOrderDate_(row[1]);
+    var status = normalizeOrderStatus_(row[15], row[17]);
+    var ageHours = createdAt ? (now.getTime() - createdAt.getTime()) / 3600000 : 0;
+    var expiresAt = createdAt ? new Date(createdAt.getTime() + ORDER_EXPIRES_DISPLAY_HOURS_ * 3600000) : null;
     return {
       orderNo: row[0], createdAt: row[1], lineDisplayName: row[3], customerName: row[4],
       phone: row[5], items: Array.isArray(items) ? items : [], itemsSummary: row[7],
       totalQty: number_(row[8]), estimatedTotal: number_(row[9]), depositTotal: number_(row[10]),
       estimatedBalance: number_(row[11]), paymentMethod: row[12], transferLast5: row[13],
-      note: row[14], status: row[15], socialProfileId: row[16],
+      note: row[14], status: status, socialProfileId: row[16],
       shippingStatus: String(row[17] || "").trim() === "已出貨" ? "已出貨" : "未出貨",
-      shippedAt: row[18]
+      shippedAt: row[18], reminderSentAt: row[19], cancelledAt: row[20],
+      reminderDue: status === ORDER_STATUS_PENDING_ && ageHours >= ORDER_REMINDER_HOURS_ && ageHours < ORDER_AUTO_CANCEL_HOURS_ && !String(row[19] || "").trim(),
+      reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : ""
     };
   }).reverse().slice(0, 300);
 }
 
-function handleAdminToggleOrderShipping_(data) {
+function handleAdminUpdateOrderStatus_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var orderNo = String(data.orderNo || "").trim();
-  if (!orderNo || typeof data.shipped !== "boolean") throw new Error("INVALID_ORDER_STATUS");
+  var status = String(data.status || "").trim();
+  var allowed = [ORDER_STATUS_PENDING_, ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_SHIPPED_];
+  if (!orderNo || allowed.indexOf(status) < 0) throw new Error("INVALID_ORDER_STATUS");
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -376,15 +401,167 @@ function handleAdminToggleOrderShipping_(data) {
     for (var index = 0; index < orderNos.length; index++) {
       if (String(orderNos[index][0] || "").trim() !== orderNo) continue;
       var rowNumber = index + 2;
-      var shippingStatus = data.shipped ? "已出貨" : "未出貨";
-      var shippedAt = data.shipped ? formatDateTime_(new Date()) : "";
+      var shippingStatus = status === ORDER_STATUS_SHIPPED_ ? "已出貨" : "未出貨";
+      var shippedAt = status === ORDER_STATUS_SHIPPED_ ? formatDateTime_(new Date()) : "";
+      sheet.getRange(rowNumber, 16).setValue(status);
       sheet.getRange(rowNumber, 18, 1, 2).setValues([[shippingStatus, shippedAt]]);
-      return json_({ ok: true, order: { orderNo: orderNo, shippingStatus: shippingStatus, shippedAt: shippedAt } });
+      return json_({ ok: true, order: { orderNo: orderNo, status: status, shippingStatus: shippingStatus, shippedAt: shippedAt, reminderDue: false } });
     }
     throw new Error("ORDER_NOT_FOUND");
   } finally {
     lock.releaseLock();
   }
+}
+
+function handleAdminCancelOrder_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var result = cancelOrder_(String(data.orderNo || "").trim(), "此訂單已由管理員取消。");
+  return json_({ ok: true, order: result });
+}
+
+function handleAdminSendOrderReminder_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  var message = cleanText_(data.message, 500);
+  if (!orderNo || !message) throw new Error("INVALID_REMINDER");
+  var lock = LockService.getScriptLock();
+  var target;
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var rowNumber = findOrderRow_(sheet, orderNo);
+    if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
+    var row = sheet.getRange(rowNumber, 1, 1, ORDER_HEADERS_.length).getDisplayValues()[0];
+    if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_) throw new Error("INVALID_ORDER_STATUS");
+    var createdAt = parseOrderDate_(row[1]);
+    var ageMilliseconds = createdAt ? new Date().getTime() - createdAt.getTime() : 0;
+    if (!createdAt || ageMilliseconds < ORDER_REMINDER_HOURS_ * 3600000 || ageMilliseconds >= ORDER_AUTO_CANCEL_HOURS_ * 3600000) throw new Error("REMINDER_NOT_DUE");
+    target = { lineUserId: row[2], orderNo: row[0] };
+  } finally {
+    lock.releaseLock();
+  }
+  if (!pushLineMessage_(target.lineUserId, { type: "text", text: message }, "reminder " + target.orderNo)) throw new Error("LINE_PUSH_FAILED");
+  sheet = spreadsheet_().getSheetByName("Preorders");
+  rowNumber = findOrderRow_(sheet, orderNo);
+  var reminderSentAt = formatDateTime_(new Date());
+  if (rowNumber) sheet.getRange(rowNumber, 20).setValue(reminderSentAt);
+  return json_({ ok: true, order: { orderNo: orderNo, reminderDue: false, reminderSentAt: reminderSentAt } });
+}
+
+function setupPreorderAutomationTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === "processExpiredPreorders") ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger("processExpiredPreorders").timeBased().everyMinutes(15).create();
+  return "每 15 分鐘檢查逾期訂單的排程已設定";
+}
+
+function processExpiredPreorders() {
+  setupQuokkaPreorder();
+  var sheet = spreadsheet_().getSheetByName("Preorders");
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length).getDisplayValues();
+  var now = new Date();
+  var expiredOrderNos = [];
+  rows.forEach(function (row) {
+    var createdAt = parseOrderDate_(row[1]);
+    if (!createdAt || normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_) return;
+    if (now.getTime() - createdAt.getTime() >= ORDER_AUTO_CANCEL_HOURS_ * 3600000) expiredOrderNos.push(String(row[0] || "").trim());
+  });
+  expiredOrderNos.forEach(function (orderNo) { if (orderNo) cancelOrder_(orderNo, "超過 25 小時未確認收到訂金"); });
+  return expiredOrderNos.length;
+}
+
+function cancelOrder_(orderNo, reason) {
+  if (!orderNo) throw new Error("ORDER_NOT_FOUND");
+  var lock = LockService.getScriptLock();
+  var target;
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var rowNumber = findOrderRow_(sheet, orderNo);
+    if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
+    var row = sheet.getRange(rowNumber, 1, 1, ORDER_HEADERS_.length).getDisplayValues()[0];
+    var currentStatus = normalizeOrderStatus_(row[15], row[17]);
+    if (currentStatus === ORDER_STATUS_CANCELLED_) {
+      return { orderNo: orderNo, status: ORDER_STATUS_CANCELLED_, shippingStatus: "未出貨", cancelledAt: row[20], reminderDue: false };
+    }
+    if (String(reason || "").indexOf("25 小時") >= 0 && currentStatus !== ORDER_STATUS_PENDING_) {
+      return { orderNo: orderNo, status: currentStatus, shippingStatus: row[17], shippedAt: row[18], reminderDue: false };
+    }
+    var cancelledAt = formatDateTime_(new Date());
+    sheet.getRange(rowNumber, 16).setValue(ORDER_STATUS_CANCELLED_);
+    sheet.getRange(rowNumber, 18, 1, 2).setValues([["未出貨", ""]]);
+    sheet.getRange(rowNumber, 21).setValue(cancelledAt);
+    target = {
+      lineUserId: row[2], orderNo: row[0], customerName: row[4],
+      itemsSummary: row[7], depositTotal: number_(row[10]), reason: reason
+    };
+  } finally {
+    lock.releaseLock();
+  }
+  var notificationSent = pushLineMessage_(target.lineUserId, buildOrderCancellationMessage_(target), "order cancellation " + target.orderNo);
+  return { orderNo: orderNo, status: ORDER_STATUS_CANCELLED_, shippingStatus: "未出貨", shippedAt: "", cancelledAt: cancelledAt, reminderDue: false, notificationSent: notificationSent };
+}
+
+function buildOrderCancellationMessage_(order) {
+  return {
+    type: "flex",
+    altText: "訂單已取消｜" + order.orderNo,
+    contents: {
+      type: "bubble",
+      styles: { header: { backgroundColor: "#7C858A" } },
+      header: {
+        type: "box", layout: "vertical", paddingAll: "18px",
+        contents: [
+          { type: "text", text: "預購訂單已取消", color: "#FFFFFF", weight: "bold", size: "xl" },
+          { type: "text", text: order.orderNo, color: "#EEF0F1", size: "sm", margin: "sm" }
+        ]
+      },
+      body: {
+        type: "box", layout: "vertical", paddingAll: "18px", backgroundColor: "#F5F6F6",
+        contents: [
+          { type: "text", text: order.customerName || "訂購人", weight: "bold", color: "#374047" },
+          { type: "text", text: order.itemsSummary || "", wrap: true, size: "sm", margin: "md", color: "#5E686D" },
+          { type: "separator", margin: "lg", color: "#D8DDDF" },
+          { type: "text", text: String(order.reason || "訂單已由管理員取消。"), wrap: true, size: "sm", margin: "lg", color: "#5E686D" },
+          { type: "text", text: "如有疑問，請直接在 LINE 與小幫手聯絡。", wrap: true, size: "xs", margin: "md", color: "#858E92" }
+        ]
+      }
+    }
+  };
+}
+
+function buildOrderReminderText_(expiresAt) {
+  var expiryText = Utilities.formatDate(expiresAt, Session.getScriptTimeZone(), "yyyy/MM/dd HH:mm");
+  return "溫馨提醒：此預訂訂單將於「" + expiryText + "」過期，記得匯款訂金金額完成訂購喔～^_^\n若您已匯款成功，請回傳帳號後五碼，方便小幫手對帳喔";
+}
+
+function normalizeOrderStatus_(status, shippingStatus) {
+  var value = String(status || "").trim();
+  if (value === ORDER_STATUS_CANCELLED_) return ORDER_STATUS_CANCELLED_;
+  if (String(shippingStatus || "").trim() === "已出貨" || value === ORDER_STATUS_SHIPPED_) return ORDER_STATUS_SHIPPED_;
+  if (value === ORDER_STATUS_DEPOSIT_RECEIVED_) return ORDER_STATUS_DEPOSIT_RECEIVED_;
+  return ORDER_STATUS_PENDING_;
+}
+
+function parseOrderDate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+  var text = String(value || "").trim();
+  if (!text) return null;
+  try { return Utilities.parseDate(text, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"); }
+  catch (error) { return null; }
+}
+
+function findOrderRow_(sheet, orderNo) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var orderNos = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+  for (var index = 0; index < orderNos.length; index++) {
+    if (String(orderNos[index][0] || "").trim() === orderNo) return index + 2;
+  }
+  return 0;
 }
 
 function readPurchaseSummary_() {
@@ -728,7 +905,7 @@ function safeError_(error) {
   var allowed = [
     "ADMIN_FORBIDDEN", "ADMIN_CONFIG_MISSING", "ADMIN_ACCESS_CODE_MISSING", "ADMIN_LOGIN_FAILED", "LINE_LOGIN_REQUIRED", "LINE_CONFIG_MISSING",
     "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
-    "ORDER_NOT_FOUND", "ORDER_FORBIDDEN", "INVALID_ORDER_STATUS",
+    "ORDER_NOT_FOUND", "ORDER_FORBIDDEN", "INVALID_ORDER_STATUS", "INVALID_REMINDER", "REMINDER_NOT_DUE", "LINE_PUSH_FAILED",
     "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
     "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING", "SALE_CLOSED"
   ];

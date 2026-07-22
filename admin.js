@@ -43,8 +43,9 @@ function bindAdminEvents() {
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
   document.getElementById("adminOrderList").addEventListener("click", handleOrderAction);
+  document.getElementById("adminOrderList").addEventListener("change", handleOrderStatusChange);
   document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
-  document.getElementById("shippingFilter").addEventListener("change", renderAdminOrders);
+  document.getElementById("orderStatusFilter").addEventListener("change", renderAdminOrders);
   document.getElementById("bankQrInput").addEventListener("change", uploadBankQr);
   document.querySelector(".admin-page-tabs").addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-page]");
@@ -146,13 +147,12 @@ function renderPurchaseSummary() {
 
 function renderAdminOrders() {
   const search = document.getElementById("orderSearch").value.trim().toLowerCase();
-  const filter = document.getElementById("shippingFilter").value;
-  const unshipped = adminState.orders.filter((order) => order.shippingStatus !== "已出貨").length;
-  document.getElementById("unshippedCount").textContent = `${formatNumber(unshipped)} 筆未出貨`;
+  const filter = document.getElementById("orderStatusFilter").value;
+  const pending = adminState.orders.filter((order) => order.status === "待收訂金").length;
+  document.getElementById("unshippedCount").textContent = `${formatNumber(pending)} 筆待收訂金`;
   const orders = adminState.orders.filter((order) => {
-    const shipped = order.shippingStatus === "已出貨";
-    if (filter === "unshipped" && shipped) return false;
-    if (filter === "shipped" && !shipped) return false;
+    if (filter === "active" && order.status === "已取消") return false;
+    if (!["active", "all"].includes(filter) && order.status !== filter) return false;
     const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName}`.toLowerCase();
     return !search || haystack.includes(search);
   });
@@ -160,36 +160,68 @@ function renderAdminOrders() {
 }
 
 function renderAdminOrderCard(order) {
-  const shipped = order.shippingStatus === "已出貨";
+  const status = ["待收訂金", "已收到訂金", "已出貨", "已取消"].includes(order.status) ? order.status : "待收訂金";
+  const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", "已出貨": "shipped", "已取消": "cancelled" }[status];
   const items = Array.isArray(order.items) ? order.items : [];
-  return `<article class="admin-order-card ${shipped ? "shipped" : "unshipped"}">
-    <header><div><span>${shipped ? "已出貨" : "未出貨"}</span><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><b>${formatNumber(order.totalQty)} 件</b></header>
+  return `<article class="admin-order-card ${statusClass}" data-order-card="${escapeAttr(order.orderNo)}">
+    <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><b>${formatNumber(order.totalQty)} 件</b></header>
     <div class="packing-items">${items.map((item) => `<div><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<b>× ${formatNumber(item.qty)}</b></div>`).join("") || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
     <dl class="customer-details">
       <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
       <div><dt>LINE</dt><dd>${escapeHtml(order.lineDisplayName || "—")}</dd></div>
       <div><dt>金額</dt><dd>商品款 NT$${formatNumber(order.estimatedTotal)}／訂金 50% NT$${formatNumber(order.depositTotal)}／剩餘商品款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
       <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
-      ${shipped && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
+      ${order.transferLast5 ? `<div><dt>匯款後五碼</dt><dd>${escapeHtml(order.transferLast5)}</dd></div>` : ""}
+      ${status === "已出貨" && order.shippedAt ? `<div><dt>出貨時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
+      ${status === "已取消" && order.cancelledAt ? `<div><dt>取消時間</dt><dd>${escapeHtml(order.cancelledAt)}</dd></div>` : ""}
     </dl>
-    <button class="shipping-action" type="button" data-shipping-order="${escapeAttr(order.orderNo)}" data-shipped="${shipped ? "true" : "false"}">${shipped ? "改回未出貨" : "標記已出貨"}</button>
+    ${order.reminderDue ? `<div class="order-reminder"><label>12 小時未收到訂金提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
+    <div class="order-status-actions">
+      <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="已出貨" ${status === "已出貨" ? "selected" : ""}>已出貨</option></select></label>
+      <button class="cancel-order-action" type="button" data-cancel-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}>${status === "已取消" ? "訂單已取消" : "取消訂單"}</button>
+    </div>
   </article>`;
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-shipping-order]");
+  const button = event.target.closest("[data-cancel-order], [data-reminder-order]");
   if (!button) return;
+  if (button.dataset.cancelOrder && !window.confirm(`確定要取消訂單 ${button.dataset.cancelOrder} 嗎？\n取消後會立即傳送取消通知給客戶。`)) return;
   button.disabled = true;
   try {
-    const result = await adminPost({ action: "adminToggleOrderShipping", orderNo: button.dataset.shippingOrder, shipped: button.dataset.shipped !== "true" });
-    if (!result.ok) throw new Error(result.error || "SHIPPING_UPDATE_FAILED");
+    const card = button.closest("[data-order-card]");
+    const payload = button.dataset.cancelOrder
+      ? { action: "adminCancelOrder", orderNo: button.dataset.cancelOrder }
+      : { action: "adminSendOrderReminder", orderNo: button.dataset.reminderOrder, message: card.querySelector(".order-reminder textarea").value.trim() };
+    if (payload.action === "adminSendOrderReminder" && !payload.message) return showToast("請輸入提醒內容");
+    const result = await adminPost(payload);
+    if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
     const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
     if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
     renderAdminOrders();
-    showToast(result.order.shippingStatus === "已出貨" ? "已標記出貨" : "已改回未出貨");
+    showToast(payload.action === "adminCancelOrder" ? (result.order.notificationSent ? "訂單已取消並發送通知" : "訂單已取消，但 LINE 通知未送達") : "提醒訊息已送出");
   } catch (error) {
-    showToast("出貨狀態更新失敗");
+    showToast("訂單操作失敗，請稍後再試");
   } finally { button.disabled = false; }
+}
+
+async function handleOrderStatusChange(event) {
+  const select = event.target.closest("[data-status-order]");
+  if (!select) return;
+  const previous = adminState.orders.find((order) => order.orderNo === select.dataset.statusOrder)?.status || "待收訂金";
+  select.disabled = true;
+  try {
+    const result = await adminPost({ action: "adminUpdateOrderStatus", orderNo: select.dataset.statusOrder, status: select.value });
+    if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
+    const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
+    if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
+    renderAdminOrders();
+    showToast(`訂單已改為「${result.order.status}」`);
+  } catch (error) {
+    select.value = previous;
+    select.disabled = false;
+    showToast("訂單狀態更新失敗");
+  }
 }
 
 function renderAdminProducts() {
