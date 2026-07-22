@@ -29,6 +29,7 @@ async function init() {
   try {
     await initLine();
   } catch (error) {
+    setLineStatus(error?.message || "LIFF_INIT_FAILED");
     console.error(error);
   }
 }
@@ -52,14 +53,17 @@ function bindEvents() {
 
 async function initLine() {
   if (!CONFIG.liffId) return;
+  setLineStatus("initializing");
   const lineRuntime = window.QuokkaLineRuntime;
   if (!lineRuntime) throw new Error("LIFF_SDK_UNAVAILABLE");
   await lineRuntime.init({ liffId: CONFIG.liffId });
   if (!lineRuntime.isLoggedIn()) {
+    setLineStatus("redirecting");
     lineRuntime.login({ redirectUri: getLiffRedirectUri() });
     return;
   }
   state.line.idToken = lineRuntime.getIDToken() || "";
+  setLineStatus(state.line.idToken ? "ready" : "missing-token");
   cleanLiffCallbackParams();
   try {
     const profile = await lineRuntime.getProfile();
@@ -68,6 +72,10 @@ async function initLine() {
   } catch (error) {
     console.warn("LINE profile unavailable", error);
   }
+}
+
+function setLineStatus(value) {
+  document.documentElement.dataset.lineStatus = String(value || "unknown");
 }
 
 function getLiffRedirectUri() {
@@ -303,7 +311,13 @@ async function showMyOrders() {
     status.hidden = true;
     list.innerHTML = result.orders.map(renderOrder).join("");
   } catch (error) {
-    status.textContent = "目前無法讀取訂單，請稍後再試。";
+    const messages = {
+      LINE_TOKEN_INVALID: "LINE 登入已過期，請重新登入後再試。",
+      LINE_LOGIN_REQUIRED: "尚未取得 LINE 登入資訊，請重新登入後再試。",
+      LINE_CONFIG_MISSING: "LINE 登入設定尚未完成，請聯絡管理員。",
+      SERVER_ERROR: "訂單系統暫時發生錯誤，請稍後再試。",
+    };
+    status.textContent = messages[error.message] || `目前無法讀取訂單（${error.message || "READ_FAILED"}）。`;
   }
 }
 
