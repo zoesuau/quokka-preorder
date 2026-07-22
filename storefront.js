@@ -26,9 +26,11 @@ async function init() {
     if (error?.message !== "API_URL_NOT_CONFIGURED") console.error(error);
     useDemoCatalog();
   }
-  if (state.settings.saleClosed) return;
   try {
     await initLine();
+    if (isOrdersShortcut() && document.documentElement.dataset.lineStatus === "verified") {
+      await showMyOrders();
+    }
   } catch (error) {
     setLineStatus(error?.message || "LIFF_INIT_FAILED");
     console.error(error);
@@ -103,7 +105,13 @@ function setLineStatus(value) {
 }
 
 function getLiffRedirectUri() {
-  return `${location.origin}${location.pathname}`;
+  const redirectUrl = new URL(`${location.origin}${location.pathname}`);
+  if (isOrdersShortcut()) redirectUrl.searchParams.set("view", "orders");
+  return redirectUrl.toString();
+}
+
+function isOrdersShortcut() {
+  return new URL(location.href).searchParams.get("view") === "orders";
 }
 
 function cleanLiffCallbackParams() {
@@ -318,6 +326,8 @@ function updateSaleClosedState() {
 }
 
 async function showMyOrders() {
+  const saleClosedDialog = document.getElementById("saleClosedDialog");
+  if (saleClosedDialog.open) saleClosedDialog.close();
   document.getElementById("catalogView").hidden = true;
   document.getElementById("ordersView").hidden = false;
   document.getElementById("cartDock").hidden = true;
@@ -354,6 +364,7 @@ function showCatalog() {
   document.getElementById("catalogView").hidden = false;
   document.getElementById("ordersView").hidden = true;
   updateCart();
+  if (state.settings.saleClosed) updateSaleClosedState();
 }
 
 function renderOrder(order) {
