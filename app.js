@@ -50,13 +50,15 @@ function bindEvents() {
 }
 
 async function initLine() {
-  if (!CONFIG.liffId || typeof liff === "undefined") return;
+  if (!CONFIG.liffId) return;
+  if (typeof liff === "undefined") throw new Error("LIFF_SDK_UNAVAILABLE");
   await liff.init({ liffId: CONFIG.liffId });
   if (!liff.isLoggedIn()) {
-    liff.login({ redirectUri: location.href });
+    liff.login({ redirectUri: getLiffRedirectUri() });
     return;
   }
   state.line.idToken = liff.getIDToken() || "";
+  cleanLiffCallbackParams();
   try {
     const profile = await liff.getProfile();
     state.line.userId = profile.userId || "";
@@ -64,6 +66,16 @@ async function initLine() {
   } catch (error) {
     console.warn("LINE profile unavailable", error);
   }
+}
+
+function getLiffRedirectUri() {
+  return `${location.origin}${location.pathname}`;
+}
+
+function cleanLiffCallbackParams() {
+  const url = new URL(location.href);
+  ["code", "state", "liffClientId", "liffRedirectUri"].forEach((key) => url.searchParams.delete(key));
+  history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 async function loadCatalog() {
