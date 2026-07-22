@@ -18,6 +18,8 @@
 ## 檔案
 
 - `index.html`：客戶預購頁
+- `storefront.js`：客戶預購頁原始程式
+- `app.js`：內含官方 LIFF SDK 的前台發布檔
 - `admin.html`：手機商品後台
 - `config.js`：GAS API 與 LIFF ID
 - `Code.gs`：Google Apps Script 後端
