@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
+    <link rel="stylesheet" href="style.css?v=20260722-sale-closed" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="app.js?v=20260722-transfer-button" defer></script>
+    <script src="app.js?v=20260722-sale-closed" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -119,6 +119,15 @@
         </label>
         <button class="primary-button submit-button" id="submitOrder" type="submit">先送出預購訂單</button>
       </form>
+    </dialog>
+
+    <dialog class="sale-closed-dialog" id="saleClosedDialog" aria-labelledby="saleClosedTitle">
+      <div class="sale-closed-content">
+        <span class="sale-closed-icon" aria-hidden="true">✓</span>
+        <p class="eyebrow">PRE-ORDER CLOSED</p>
+        <h2 id="saleClosedTitle">本次連線已結束</h2>
+        <p id="saleClosedNotice">本次連線已結束，謝謝大家的支持！</p>
+      </div>
     </dialog>
 
     <div class="toast" id="toast" role="status"></div>

@@ -310,6 +310,8 @@ async function saveProduct(event) {
 }
 
 function fillSettings() {
+  document.getElementById("saleClosed").checked = Boolean(adminState.settings.saleClosed);
+  document.getElementById("saleClosedNotice").value = adminState.settings.saleClosedNotice || "本次連線已結束，謝謝大家的支持！";
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
   document.getElementById("bankTransferInfoSetting").value = adminState.settings.bankTransferInfo || "";
   document.getElementById("bankName").value = adminState.settings.bankName || "";
@@ -327,6 +329,8 @@ async function saveSettings(event) {
   event.preventDefault();
   if (adminState.bankUploadBusy) return showToast("請等 QR Code 上傳完成");
   const settings = {
+    saleClosed: document.getElementById("saleClosed").checked,
+    saleClosedNotice: document.getElementById("saleClosedNotice").value.trim(),
     preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
     bankTransferInfo: document.getElementById("bankTransferInfoSetting").value.trim(),
     bankName: document.getElementById("bankName").value.trim(),
@@ -341,7 +345,7 @@ async function saveSettings(event) {
     if (!result.ok) throw new Error(result.error || "SETTINGS_FAILED");
     adminState.settings = result.settings;
     updateAdminPricePreview();
-    showToast("預購設定已儲存");
+    showToast(settings.saleClosed ? "已開啟前台停賣" : "已恢復前台販售");
   } catch (error) { showToast("設定儲存失敗"); }
 }
 

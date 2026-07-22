@@ -24,6 +24,8 @@ var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
   preorderNotice: "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。",
+  saleClosed: false,
+  saleClosedNotice: "本次連線已結束，謝謝大家的支持！",
   bankTransferInfo: "",
   bankName: "",
   bankCode: "",
@@ -101,6 +103,8 @@ function handleCreatePreorder_(data) {
   lock.waitLock(20000);
   try {
     setupQuokkaPreorder();
+    var settings = readSettings_();
+    if (settings.saleClosed) throw new Error("SALE_CLOSED");
     validatePreorderFields_(data);
     var catalog = readProducts_();
     var productMap = {};
@@ -492,6 +496,8 @@ function handleAdminSaveSettings_(data) {
   var settings = {
     exchangeRate: currentSettings.exchangeRate,
     preorderNotice: cleanText_(source.preorderNotice, 300),
+    saleClosed: source.saleClosed === true,
+    saleClosedNotice: cleanText_(source.saleClosedNotice, 300) || DEFAULT_SETTINGS_.saleClosedNotice,
     bankTransferInfo: cleanText_(source.bankTransferInfo, 300),
     bankName: cleanText_(source.bankName, 50),
     bankCode: cleanText_(source.bankCode, 10),
@@ -511,6 +517,8 @@ function handleAdminSaveSettings_(data) {
     var rows = [
       ["exchangeRate", settings.exchangeRate, "韓幣換算率"],
       ["preorderNotice", settings.preorderNotice, "前台預購說明"],
+      ["saleClosed", settings.saleClosed, "前台停賣"],
+      ["saleClosedNotice", settings.saleClosedNotice, "停賣公告"],
       ["bankTransferInfo", settings.bankTransferInfo, "訂金匯款資訊"],
       ["bankName", settings.bankName, "銀行名稱"],
       ["bankCode", settings.bankCode, "銀行代碼"],
@@ -594,6 +602,8 @@ function readSettings_() {
     var key = String(row[0] || "").trim();
     if (key === "exchangeRate") settings.exchangeRate = number_(row[1]) || DEFAULT_SETTINGS_.exchangeRate;
     if (key === "preorderNotice") settings.preorderNotice = String(row[1] || "").trim();
+    if (key === "saleClosed") settings.saleClosed = String(row[1] || "").toLowerCase() === "true";
+    if (key === "saleClosedNotice") settings.saleClosedNotice = String(row[1] || "").trim() || DEFAULT_SETTINGS_.saleClosedNotice;
     if (key === "bankTransferInfo") settings.bankTransferInfo = String(row[1] || "").trim();
     if (key === "bankName") settings.bankName = String(row[1] || "").trim();
     if (key === "bankCode") settings.bankCode = String(row[1] || "").trim();
@@ -669,9 +679,11 @@ function ensureSheet_(ss, name, headers) {
 function ensureSettingsSheet_(ss) {
   var sheet = ensureSheet_(ss, "Settings", SETTING_HEADERS_);
   if (sheet.getLastRow() < 2) {
-    sheet.getRange(2, 1, 9, 3).setValues([
+    sheet.getRange(2, 1, 11, 3).setValues([
       ["exchangeRate", DEFAULT_SETTINGS_.exchangeRate, "韓幣換算率"],
       ["preorderNotice", DEFAULT_SETTINGS_.preorderNotice, "前台預購說明"],
+      ["saleClosed", DEFAULT_SETTINGS_.saleClosed, "前台停賣"],
+      ["saleClosedNotice", DEFAULT_SETTINGS_.saleClosedNotice, "停賣公告"],
       ["bankTransferInfo", "", "訂金匯款資訊"],
       ["bankName", "", "銀行名稱"],
       ["bankCode", "", "銀行代碼"],
@@ -718,7 +730,7 @@ function safeError_(error) {
     "LINE_TOKEN_INVALID", "INVALID_ITEMS", "INVALID_CUSTOMER", "INVALID_TRANSFER_LAST5",
     "ORDER_NOT_FOUND", "ORDER_FORBIDDEN", "INVALID_ORDER_STATUS",
     "INVALID_PRODUCT", "PRODUCT_CHANGED", "PRODUCT_NOT_FOUND", "INVALID_IMAGE",
-    "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING"
+    "IMAGE_TOO_LARGE", "INVALID_SETTINGS", "SPREADSHEET_CONFIG_MISSING", "SALE_CLOSED"
   ];
   return allowed.indexOf(message) >= 0 ? message : "SERVER_ERROR";
 }

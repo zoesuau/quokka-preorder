@@ -1,7 +1,7 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
 const state = {
   products: [],
-  settings: { preorderNotice: "", bankTransferInfo: "" },
+  settings: { preorderNotice: "", bankTransferInfo: "", saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
   category: "全部",
   cart: [],
   selectedProduct: null,
@@ -18,14 +18,22 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   document.getElementById("brandName").textContent = CONFIG.brandName || "袋著走";
   bindEvents();
-  const [catalogResult] = await Promise.allSettled([loadCatalog(), initLine()]);
-  if (catalogResult.status === "rejected") {
-    if (catalogResult.reason?.message !== "API_URL_NOT_CONFIGURED") console.error(catalogResult.reason);
+  try {
+    await loadCatalog();
+  } catch (error) {
+    if (error?.message !== "API_URL_NOT_CONFIGURED") console.error(error);
     useDemoCatalog();
+  }
+  if (state.settings.saleClosed) return;
+  try {
+    await initLine();
+  } catch (error) {
+    console.error(error);
   }
 }
 
 function bindEvents() {
+  document.getElementById("saleClosedDialog").addEventListener("cancel", (event) => event.preventDefault());
   document.getElementById("addToCart").addEventListener("click", addSelectedProduct);
   document.getElementById("openCheckout").addEventListener("click", openCheckout);
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
@@ -69,6 +77,7 @@ async function loadCatalog() {
   state.products = data.products.filter((product) => product.active);
   state.settings = { ...state.settings, ...(data.settings || {}) };
   renderCatalog();
+  updateSaleClosedState();
 }
 
 function useDemoCatalog() {
@@ -121,6 +130,7 @@ function placeholderSvg() {
 }
 
 function openProduct(id) {
+  if (state.settings.saleClosed) return updateSaleClosedState();
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
   state.selectedProduct = product;
@@ -139,6 +149,7 @@ function openProduct(id) {
 }
 
 function addSelectedProduct() {
+  if (state.settings.saleClosed) return updateSaleClosedState();
   const product = state.selectedProduct;
   if (!product) return;
   const variant = document.getElementById("variantField").hidden ? "" : document.getElementById("dialogVariant").value;
@@ -153,7 +164,7 @@ function addSelectedProduct() {
 
 function updateCart() {
   const qty = state.cart.reduce((sum, item) => sum + item.qty, 0);
-  document.getElementById("cartDock").hidden = qty === 0 || !document.getElementById("ordersView").hidden;
+  document.getElementById("cartDock").hidden = state.settings.saleClosed || qty === 0 || !document.getElementById("ordersView").hidden;
   document.getElementById("cartQty").textContent = qty;
   document.getElementById("cartDeposit").textContent = `NT$${formatNumber(getTotals().depositTotal)}`;
 }
@@ -172,6 +183,7 @@ function getTotals() {
 }
 
 function openCheckout() {
+  if (state.settings.saleClosed) return updateSaleClosedState();
   renderCheckout();
   document.getElementById("checkoutDialog").showModal();
 }
@@ -191,6 +203,7 @@ function renderCheckout() {
 
 async function submitOrder(event) {
   event.preventDefault();
+  if (state.settings.saleClosed) return updateSaleClosedState();
   if (!CONFIG.apiUrl) return showToast("尚未設定 GAS API，現在是版面預覽模式");
   if (!state.line.idToken) return showToast("請從 LINE 開啟此頁並完成登入");
   const button = document.getElementById("submitOrder");
@@ -219,6 +232,7 @@ async function submitOrder(event) {
   } catch (error) {
     console.error(error);
     const messages = {
+      SALE_CLOSED: "本次連線已結束，暫停接受新訂單",
       PRODUCT_CHANGED: "商品資訊已更新，請重新整理後再送出",
       LINE_TOKEN_INVALID: "LINE 登入已過期，請關閉頁面後從 LINE 重新開啟",
       LINE_LOGIN_REQUIRED: "請從 LINE 開啟此頁並完成登入",
@@ -228,10 +242,30 @@ async function submitOrder(event) {
       SPREADSHEET_CONFIG_MISSING: "訂單系統尚未連接試算表，請聯絡管理員",
       SERVER_ERROR: "訂單系統暫時發生錯誤，請聯絡管理員",
     };
-    showToast(messages[error.message] || `送出失敗（${error.message || "網路連線異常"}）`);
+    if (error.message === "SALE_CLOSED") {
+      state.settings.saleClosed = true;
+      updateSaleClosedState();
+    } else {
+      showToast(messages[error.message] || `送出失敗（${error.message || "網路連線異常"}）`);
+    }
   } finally {
     button.disabled = false;
     button.textContent = "先送出預購訂單";
+  }
+}
+
+function updateSaleClosedState() {
+  const dialog = document.getElementById("saleClosedDialog");
+  document.getElementById("saleClosedNotice").textContent = state.settings.saleClosedNotice || "本次連線已結束，謝謝大家的支持！";
+  document.getElementById("cartDock").hidden = Boolean(state.settings.saleClosed) || state.cart.length === 0;
+  if (state.settings.saleClosed) {
+    ["productDialog", "checkoutDialog"].forEach((id) => {
+      const openDialog = document.getElementById(id);
+      if (openDialog.open) openDialog.close();
+    });
+    if (!dialog.open) dialog.showModal();
+  } else if (dialog.open) {
+    dialog.close();
   }
 }
 

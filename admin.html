@@ -9,10 +9,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260718-pages" />
+    <link rel="stylesheet" href="admin.css?v=20260722-sale-closed" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260722-transfer-button" defer></script>
+    <script src="admin.js?v=20260722-sale-closed" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -69,6 +69,8 @@
       <details class="settings-card">
         <summary>預購設定</summary>
         <form id="settingsForm">
+          <label class="switch-field sale-closed-switch"><span>前台停賣</span><input id="saleClosed" type="checkbox" /><i></i></label>
+          <label class="field"><span>停賣公告</span><textarea id="saleClosedNotice" rows="3" maxlength="300" placeholder="本次連線已結束，謝謝大家的支持！"></textarea></label>
           <p class="order-first-note"><strong>訂金規則</strong><br />商品總額的 50%，回國後支付剩餘商品款。</p>
           <label class="field"><span>前台預購說明</span><textarea id="adminPreorderNotice" rows="3" maxlength="300"></textarea></label>
           <h3 class="settings-subtitle">匯款帳號</h3>
