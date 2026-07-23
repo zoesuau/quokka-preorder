@@ -6,6 +6,7 @@
   --peach: #c9574f;
   --peach-dark: #ef0025;
   --butter: #f1c84b;
+  --gold-text: #b87900;
   --sage: #32685d;
   --line: #c8d8df;
   --winter-blue: #47748e;
@@ -27,14 +28,14 @@ button { color: inherit; }
 .text-button { border: 0; background: transparent; color: var(--peach-dark); font-weight: 700; cursor: pointer; }
 
 main { width: min(100%, 760px); margin: auto; padding: 18px 16px 110px; }
+.catalog-search { position: relative; display: block; margin: 18px 0 4px; }
+.catalog-search input { width: 100%; padding: 13px 15px; border: 1px solid rgba(255,255,255,.72); border-radius: 16px; background: rgba(255,253,247,.96); color: var(--ink); outline: none; box-shadow: 0 7px 20px rgba(38,76,96,.1); }
+.catalog-search input:focus { border-color: var(--butter); box-shadow: 0 0 0 3px rgba(241,200,75,.28), 0 7px 20px rgba(38,76,96,.1); }
 .hero { position: relative; overflow: hidden; padding: 32px 24px; border: 1px solid rgba(255,255,255,.18); border-radius: 28px; background: linear-gradient(145deg, var(--winter-blue), var(--sky-blue)); color: white; box-shadow: var(--shadow); }
 .hero::after { content: ""; position: absolute; width: 140px; height: 140px; right: -28px; bottom: -45px; border: 26px solid rgba(255,255,255,.35); border-radius: 50%; }
-.hero h2 { margin: 10px 0 12px; font-size: clamp(1.75rem, 8vw, 2.65rem); line-height: 1.25; letter-spacing: -.03em; }
+.hero h2 { margin: 10px 0 12px; font-size: clamp(1.35rem, 5.5vw, 2rem); line-height: 1.3; letter-spacing: -.02em; }
 .hero p { position: relative; z-index: 1; max-width: 34rem; margin: 0; color: #eff7fa; font-size: .9rem; line-height: 1.7; }
 .hero-sticker { display: inline-block; padding: 6px 10px; border-radius: 999px; background: var(--butter); color: var(--ink); font-size: .72rem; font-weight: 700; transform: rotate(-2deg); }
-.notice-card { margin: 14px 0 28px; padding: 15px 18px; border: 1px solid rgba(255,255,255,.65); border-radius: 18px; background: rgba(255,253,247,.92); box-shadow: 0 8px 22px rgba(38,76,96,.1); }
-.notice-card strong { color: var(--peach-dark); }
-.notice-card p { margin: 5px 0 0; color: var(--muted); font-size: .86rem; line-height: 1.6; }
 
 .section-heading { display: flex; align-items: end; justify-content: space-between; margin: 24px 2px 15px; }
 .section-heading h2 { margin: 0; font-size: 1.45rem; }
@@ -49,10 +50,13 @@ main { width: min(100%, 760px); margin: auto; padding: 18px 16px 110px; }
 .product-card:active { transform: scale(.98); }
 .product-card img { display: block; width: 100%; aspect-ratio: 1/1; object-fit: cover; background: #f3eee9; }
 .product-card-body { padding: 11px 11px 13px; }
-.category-label { display: inline-block; color: var(--peach-dark); font-size: .68rem; font-weight: 700; }
-.product-card h3 { min-height: 2.8em; margin: 5px 0 7px; font-size: .9rem; line-height: 1.4; }
-.product-card .price { margin: 0; color: var(--ink); font-size: 1rem; font-weight: 700; }
-.product-card small { color: var(--muted); font-size: .7rem; }
+.category-label { display: inline-block; color: var(--gold-text); font-size: .68rem; font-weight: 700; }
+.product-card h3 { display: -webkit-box; min-height: 2.8em; max-height: 2.8em; margin: 5px 0 8px; overflow: hidden; font-size: .9rem; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.product-card-purchase { display: flex; gap: 7px; align-items: center; justify-content: space-between; }
+.product-card .price { margin: 0; color: var(--gold-text); font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
+.card-add-button { flex: none; min-height: 34px; padding: 7px 10px; border: 0; border-radius: 10px; background: var(--peach-dark); color: white; font-size: .72rem; font-weight: 700; cursor: pointer; }
+.card-add-button:focus-visible { outline: 3px solid rgba(239,0,37,.22); outline-offset: 2px; }
+.product-card small { display: block; margin-top: 5px; color: var(--muted); font-size: .7rem; }
 
 .cart-dock { position: fixed; z-index: 30; right: 0; bottom: 0; left: 0; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: rgba(237,245,248,.93); border-top: 1px solid var(--line); backdrop-filter: blur(12px); }
 .cart-dock button { display: flex; width: min(100%, 732px); margin: auto; padding: 14px 17px; align-items: center; justify-content: space-between; border: 0; border-radius: 16px; background: var(--peach-dark); color: white; cursor: pointer; }
@@ -117,12 +121,17 @@ dialog::backdrop { background: rgba(55,43,36,.52); backdrop-filter: blur(3px); }
 .order-card h3 { margin: 0; font-size: 1rem; }
 .order-card time { color: var(--muted); font-size: .72rem; }
 .order-status { flex: none; align-self: start; padding: 5px 9px; border-radius: 999px; background: #dcece6; color: var(--sage); font-size: .72rem; font-weight: 700; }
+.order-status.overdue { background: #f3e4e1; color: #9a3e36; }
 .order-card pre { margin: 12px 0; color: var(--muted); font: inherit; font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
 .order-money { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding-top: 11px; border-top: 1px solid var(--line); }
 .order-money div { display: grid; gap: 3px; }
 .order-money span { color: var(--muted); font-size: .66rem; }
 .order-money strong { font-size: .82rem; }
 .payment-action { width: 100%; margin-top: 13px; padding: 11px; border: 1px solid var(--peach-dark); border-radius: 12px; background: white; color: var(--peach-dark); font-weight: 700; cursor: pointer; }
+.mall-payment { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }
+.mall-payment p { margin: 0 0 9px; color: var(--muted); font-size: .76rem; line-height: 1.55; }
+.mall-payment .payment-action { display: block; margin-top: 0; background: var(--peach-dark); color: white; text-align: center; text-decoration: none; }
+.mall-payment-expired { color: #9a3e36 !important; font-weight: 700; }
 .toast { position: fixed; z-index: 100; left: 50%; bottom: 92px; max-width: calc(100% - 32px); padding: 11px 15px; border-radius: 12px; background: #302822; color: white; font-size: .82rem; opacity: 0; pointer-events: none; transform: translate(-50%, 12px); transition: .2s ease; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 

@@ -192,7 +192,7 @@ function handleCreatePreorder_(data) {
     });
 
     if (!cleanItems.length || totalQty > 100) throw new Error("INVALID_ITEMS");
-    var depositTotal = Math.round(estimatedTotal * 0.5);
+    var depositTotal = Math.ceil(estimatedTotal * 0.5);
     var estimatedBalance = estimatedTotal - depositTotal;
     var now = new Date();
     var orderNo = createOrderNo_(now);
@@ -487,9 +487,15 @@ function handleReadMyPreorders_(data) {
     .getRange(2, 1, lastRow - 1, ORDER_HEADERS_.length)
     .getDisplayValues();
   var orders = [];
-  for (var index = rows.length - 1; index >= 0 && orders.length < 50; index--) {
+  var settings = readSettings_();
+  for (var index = rows.length - 1; index >= 0; index--) {
     var row = rows[index];
     if (String(row[2]).trim() !== profile.sub) continue;
+    var status = normalizeOrderStatus_(row[15], row[17]);
+    var mallDeadline =
+      status === ORDER_STATUS_SHIPPED_
+        ? buildMallPaymentDeadline_(row[18])
+        : null;
     orders.push({
       orderNo: row[0],
       createdAt: row[1],
@@ -497,7 +503,12 @@ function handleReadMyPreorders_(data) {
       estimatedTotal: number_(row[9]),
       depositTotal: number_(row[10]),
       estimatedBalance: number_(row[11]),
-      status: row[15],
+      status: status,
+      shippedAt: row[18],
+      iopenMallUrl:
+        mallDeadline && !mallDeadline.expired ? settings.iopenMallUrl : "",
+      mallPaymentDueText: mallDeadline ? mallDeadline.display : "",
+      mallPaymentExpired: mallDeadline ? mallDeadline.expired : false,
     });
   }
   return json_({ ok: true, orders: orders });
@@ -626,6 +637,7 @@ function handleAdminUpdateOrderStatus_(data) {
         orderNo: row[0],
         customerName: row[4],
         depositTotal: number_(row[10]),
+        shippedAt: shippedAt,
       };
       break;
     }
@@ -711,6 +723,8 @@ function buildDepositReceivedMessage_(order) {
 }
 
 function buildIopenMallReadyMessage_(order, iopenMallUrl) {
+  var mallDeadline = buildMallPaymentDeadline_(order.shippedAt);
+  var paymentDeadlineText = mallDeadline ? mallDeadline.display : "賣場開設後第七日 24:00";
   return {
     type: "flex",
     altText: "iOPEN Mall 賣場已開設｜" + order.orderNo,
@@ -749,7 +763,7 @@ function buildIopenMallReadyMessage_(order, iopenMallUrl) {
         contents: [
           {
             type: "text",
-            text: "請前往下方 iOPEN Mall 網址填寫取貨訂單。",
+            text: "請於 " + paymentDeadlineText + " 前完成付款。",
             wrap: true,
             weight: "bold",
             size: "md",
@@ -776,7 +790,7 @@ function buildIopenMallReadyMessage_(order, iopenMallUrl) {
             color: "#4F9468",
             action: {
               type: "uri",
-              label: "前往 iOPEN Mall 填單",
+              label: "前往 iOPEN Mall 賣場",
               uri: iopenMallUrl,
             },
           },
@@ -1068,6 +1082,24 @@ function parseOrderDate_(value) {
   } catch (error) {
     return null;
   }
+}
+
+function buildMallPaymentDeadline_(shippedAt) {
+  var openedAt = parseOrderDate_(shippedAt);
+  if (!openedAt) return null;
+  var timezone = Session.getScriptTimeZone();
+  var openedDate = Utilities.formatDate(openedAt, timezone, "yyyy-MM-dd");
+  var openedDayStart = Utilities.parseDate(
+    openedDate + " 00:00:00",
+    timezone,
+    "yyyy-MM-dd HH:mm:ss",
+  );
+  var deadline = new Date(openedDayStart.getTime() + 8 * 24 * 60 * 60 * 1000);
+  var displayDate = new Date(deadline.getTime() - 1000);
+  return {
+    display: Utilities.formatDate(displayDate, timezone, "yyyy/MM/dd") + " 24:00",
+    expired: new Date().getTime() >= deadline.getTime(),
+  };
 }
 
 function findOrderRow_(sheet, orderNo) {

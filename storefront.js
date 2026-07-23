@@ -4,6 +4,7 @@ const state = {
   products: [],
   settings: { preorderNotice: "", bankTransferInfo: "", saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
   category: "全部",
+  search: "",
   cart: [],
   selectedProduct: null,
   line: { idToken: "", userId: "", displayName: "" },
@@ -44,6 +45,10 @@ function bindEvents() {
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
   document.getElementById("myOrdersButton").addEventListener("click", showMyOrders);
   document.getElementById("backToCatalog").addEventListener("click", showCatalog);
+  document.getElementById("catalogSearch").addEventListener("input", (event) => {
+    state.search = event.target.value.trim();
+    renderCatalog();
+  });
   document.getElementById("checkoutItems").addEventListener("click", (event) => {
     const button = event.target.closest("[data-remove]");
     if (!button) return;
@@ -55,9 +60,9 @@ function bindEvents() {
 }
 
 async function initLine() {
-  if (!CONFIG.liffId) return;
+  if (!CONFIG.liffId || isLocalPreview()) return;
   setLineStatus("initializing");
-  const lineRuntime = window.QuokkaLineRuntime;
+  const lineRuntime = window.QuokkaLineRuntime || window.liff;
   if (!lineRuntime) throw new Error("LIFF_SDK_UNAVAILABLE");
   await lineRuntime.init({ liffId: CONFIG.liffId });
   if (!lineRuntime.isLoggedIn()) {
@@ -78,6 +83,10 @@ async function initLine() {
   await validateLineSession();
 }
 
+function isLocalPreview() {
+  return ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+}
+
 async function validateLineSession() {
   if (!CONFIG.apiUrl || !state.line.idToken) return;
   const result = await apiPost({ action: "readMyPreorders", idToken: state.line.idToken });
@@ -91,7 +100,7 @@ async function validateLineSession() {
 }
 
 function restartLineLogin() {
-  const lineRuntime = window.QuokkaLineRuntime;
+  const lineRuntime = window.QuokkaLineRuntime || window.liff;
   if (!lineRuntime || sessionStorage.getItem("quokka-line-login-retry") === "1") return false;
   sessionStorage.setItem("quokka-line-login-retry", "1");
   setLineStatus("refreshing");
@@ -125,13 +134,19 @@ async function loadCatalog() {
   const url = new URL(CONFIG.apiUrl);
   url.searchParams.set("action", "readPublicCatalog");
   url.searchParams.set("t", Date.now());
-  const response = await fetch(url);
-  const data = await response.json();
-  if (!response.ok || !data.ok || !Array.isArray(data.products)) throw new Error(data.error || "CATALOG_LOAD_FAILED");
-  state.products = data.products.filter((product) => product.active);
-  state.settings = { ...state.settings, ...(data.settings || {}) };
-  renderCatalog();
-  updateSaleClosedState();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok || !data.ok || !Array.isArray(data.products)) throw new Error(data.error || "CATALOG_LOAD_FAILED");
+    state.products = data.products.filter((product) => product.active);
+    state.settings = { ...state.settings, ...(data.settings || {}) };
+    renderCatalog();
+    updateSaleClosedState();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function useDemoCatalog() {
@@ -151,27 +166,37 @@ function renderCatalog() {
     renderCatalog();
   }));
 
-  const visible = state.category === "全部" ? state.products : state.products.filter((product) => product.category === state.category);
+  const query = state.search.toLocaleLowerCase("zh-TW");
+  const categoryProducts = state.category === "全部" ? state.products : state.products.filter((product) => product.category === state.category);
+  const visible = query
+    ? categoryProducts.filter((product) => {
+      const variants = Array.isArray(product.variants) ? product.variants.join(" ") : String(product.variants || "");
+      return `${product.name} ${product.category} ${product.description || ""} ${variants}`.toLocaleLowerCase("zh-TW").includes(query);
+    })
+    : categoryProducts;
   document.getElementById("productCount").textContent = `${visible.length} 件商品`;
   document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。";
   const grid = document.getElementById("productGrid");
   grid.innerHTML = visible.map((product) => {
-    return `<article class="product-card" role="button" tabindex="0" aria-label="查看 ${escapeAttr(product.name)}" data-product-id="${escapeAttr(product.id)}">
+    return `<article class="product-card" data-product-id="${escapeAttr(product.id)}">
       ${productImage(product)}
       <div class="product-card-body"><span class="category-label">${escapeHtml(product.category || "韓國小物")}</span>
-      <h3>${escapeHtml(product.name)}</h3><p class="price">NT$${formatNumber(product.priceTwd)}</p><small>訂金 50%</small></div>
+      <h3>${escapeHtml(product.name)}</h3>
+      <div class="product-card-purchase"><p class="price">NT$${formatNumber(product.priceTwd)}</p><button class="card-add-button" type="button" data-add-product="${escapeAttr(product.id)}" aria-label="加入 ${escapeAttr(product.name)}">＋ 加入</button></div>
+      <small>訂金 NT$${formatNumber(calculateDeposit(product.priceTwd))}</small></div>
     </article>`;
   }).join("");
   grid.querySelectorAll(".product-card").forEach((card) => {
     card.addEventListener("click", () => openProduct(card.dataset.productId));
-    card.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      openProduct(card.dataset.productId);
+  });
+  grid.querySelectorAll("[data-add-product]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      quickAddProduct(button.dataset.addProduct);
     });
   });
   document.getElementById("catalogStatus").hidden = visible.length > 0;
-  if (!visible.length) document.getElementById("catalogStatus").textContent = "這個分類目前還沒有上架商品。";
+  if (!visible.length) document.getElementById("catalogStatus").textContent = query ? `找不到符合「${state.search}」的商品。` : "這個分類目前還沒有上架商品。";
 }
 
 function productImage(product) {
@@ -208,10 +233,23 @@ function addSelectedProduct() {
   if (!product) return;
   const variant = document.getElementById("variantField").hidden ? "" : document.getElementById("dialogVariant").value;
   const qty = Number(document.getElementById("dialogQty").value) || 1;
+  addProductToCart(product, variant, qty);
+  document.getElementById("productDialog").close();
+}
+
+function quickAddProduct(id) {
+  if (state.settings.saleClosed) return updateSaleClosedState();
+  const product = state.products.find((item) => item.id === id);
+  if (!product) return;
+  const variants = Array.isArray(product.variants) ? product.variants : parseVariants(product.variants);
+  if (variants.length) return openProduct(id);
+  addProductToCart(product, "", 1);
+}
+
+function addProductToCart(product, variant, qty) {
   const existing = state.cart.find((item) => item.productId === product.id && item.variant === variant);
   if (existing) existing.qty += qty;
   else state.cart.push({ productId: product.id, variant, qty });
-  document.getElementById("productDialog").close();
   updateCart();
   showToast(`已加入 ${qty} 件商品`);
 }
@@ -232,8 +270,12 @@ function getTotals() {
     qty += item.qty;
     estimatedTotal += Number(product.priceTwd || 0) * item.qty;
   });
-  const depositTotal = Math.round(estimatedTotal * 0.5);
+  const depositTotal = calculateDeposit(estimatedTotal);
   return { qty, estimatedTotal, depositTotal, balanceTotal: estimatedTotal - depositTotal };
+}
+
+function calculateDeposit(amount) {
+  return Math.ceil(Number(amount || 0) * 0.5);
 }
 
 function openCheckout() {
@@ -368,7 +410,14 @@ function showCatalog() {
 }
 
 function renderOrder(order) {
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status">${escapeHtml(order.status || "待人工確認")}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>本次訂金（50%）</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>回國後商品款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div></article>`;
+  const mallReady = Boolean(order.mallPaymentDueText);
+  const displayStatus = order.mallPaymentExpired ? "賣場付款已逾期" : (mallReady ? "賣場已開設" : (order.status || "待人工確認"));
+  const mallAction = mallReady
+    ? `<div class="mall-payment">${order.mallPaymentExpired
+      ? `<p class="mall-payment-expired">付款期限為 ${escapeHtml(order.mallPaymentDueText)}，如仍需購買請聯絡客服。</p>`
+      : `<p>請於 ${escapeHtml(order.mallPaymentDueText)} 前完成付款</p>${order.iopenMallUrl ? `<a class="payment-action" href="${escapeAttr(order.iopenMallUrl)}" target="_blank" rel="noopener noreferrer">前往 iOPEN Mall 賣場</a>` : ""}`}</div>`
+    : "";
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status ${order.mallPaymentExpired ? "overdue" : ""}">${escapeHtml(displayStatus)}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>本次訂金</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>回國後商品款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${mallAction}</article>`;
 }
 
 async function apiPost(payload) {

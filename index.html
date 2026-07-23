@@ -8,9 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260722-sale-closed" />
+    <link rel="stylesheet" href="style.css?v=20260723-welcome-gold" />
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="app.js?v=20260723-orders-shortcut" defer></script>
+    <script src="storefront.js?v=20260723-catalog-search" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -22,18 +23,17 @@
     </header>
 
     <main>
-      <section class="hero">
-        <span class="hero-sticker">QUOKKA PICK</span>
-        <h2>把韓國遇見的<br />可愛一起袋回家</h2>
-        <p>旅途中即時上架・下單先付 50% 訂金・回國後至 iOPEN Mall 支付剩餘商品款取貨</p>
-      </section>
-
-      <section class="notice-card" aria-label="預購說明">
-        <strong>預購方式</strong>
-        <p id="preorderNotice">商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。</p>
-      </section>
-
       <section class="catalog-section" id="catalogView">
+        <section class="hero" aria-label="預購方式">
+          <span class="hero-sticker">預購方式</span>
+          <h2>歡迎來到鼠購易</h2>
+          <p id="preorderNotice">商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。</p>
+        </section>
+
+        <label class="catalog-search" for="catalogSearch">
+          <input id="catalogSearch" type="search" maxlength="100" autocomplete="off" placeholder="搜尋商品名稱或分類" />
+        </label>
+
         <div class="section-heading">
           <div>
             <p class="eyebrow">TODAY'S PICKS</p>
@@ -62,7 +62,7 @@
     <div class="cart-dock" id="cartDock" hidden>
       <button type="button" id="openCheckout">
         <span><b id="cartQty">0</b> 件商品</span>
-        <span>訂金 50% <b id="cartDeposit">NT$0</b>　查看明細 →</span>
+        <span>訂金 <b id="cartDeposit">NT$0</b>　查看明細 →</span>
       </button>
     </div>
 
