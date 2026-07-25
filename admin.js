@@ -34,6 +34,7 @@ async function initAdmin() {
 
 function bindAdminEvents() {
   document.getElementById("adminLoginForm").addEventListener("submit", loginWithAccessCode);
+  document.getElementById("adminAccessCodeToggle").addEventListener("click", toggleAdminAccessCodeVisibility);
   document.getElementById("newProduct").addEventListener("click", () => openEditor());
   document.getElementById("refreshProducts").addEventListener("click", loadAdminProducts);
   document.getElementById("productSearch").addEventListener("input", renderAdminProducts);
@@ -52,6 +53,17 @@ function bindAdminEvents() {
     const button = event.target.closest("[data-admin-page]");
     if (button) switchAdminPage(button.dataset.adminPage);
   });
+}
+
+function toggleAdminAccessCodeVisibility() {
+  const input = document.getElementById("adminAccessCode");
+  const button = document.getElementById("adminAccessCodeToggle");
+  const shouldShow = input.type === "password";
+  input.type = shouldShow ? "text" : "password";
+  button.setAttribute("aria-pressed", String(shouldShow));
+  button.setAttribute("aria-label", shouldShow ? "隱藏管理登入碼" : "顯示管理登入碼");
+  input.focus({ preventScroll: true });
+  input.setSelectionRange(input.value.length, input.value.length);
 }
 
 function switchAdminPage(page) {

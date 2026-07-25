@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260722-status-notify" />
+    <link rel="stylesheet" href="admin.css?v=20260726-password-toggle" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260722-status-notify" defer></script>
+    <script src="admin.js?v=20260726-password-toggle" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -25,7 +25,18 @@
         <h2>登入商品後台</h2>
         <p>請輸入管理登入碼，登入後可用手機新增、修改與上下架商品。</p>
         <form id="adminLoginForm">
-          <label class="field"><span>管理登入碼</span><input id="adminAccessCode" type="password" inputmode="numeric" autocomplete="current-password" required /></label>
+          <div class="field">
+            <label for="adminAccessCode">管理登入碼</label>
+            <span class="password-input-wrap">
+              <input id="adminAccessCode" type="password" inputmode="numeric" autocomplete="current-password" required />
+              <button class="password-toggle" id="adminAccessCodeToggle" type="button" aria-label="顯示管理登入碼" aria-controls="adminAccessCode" aria-pressed="false">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                  <circle cx="12" cy="12" r="2.75"></circle>
+                </svg>
+              </button>
+            </span>
+          </div>
           <button class="primary-button" id="adminLoginButton" type="submit">登入後台</button>
         </form>
         <div class="login-feedback" id="adminLoginFeedback"></div>
