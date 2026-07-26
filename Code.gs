@@ -51,6 +51,7 @@ var ORDER_STATUS_PENDING_ = "待收訂金";
 var ORDER_STATUS_DEPOSIT_RECEIVED_ = "已收到訂金";
 var ORDER_STATUS_SHIPPED_ = "已開設 iOPEN Mall 賣場";
 var ORDER_STATUS_SHIPPED_LEGACY_ = "已出貨";
+var ORDER_STATUS_COMPLETED_ = "訂單已完成";
 var ORDER_STATUS_CANCELLED_ = "已取消";
 var ORDER_REMINDER_HOURS_ = 12;
 var ORDER_EXPIRES_DISPLAY_HOURS_ = 24;
@@ -570,7 +571,10 @@ function readAdminOrders_() {
         status: status,
         socialProfileId: row[16],
         shippingStatus:
-          status === ORDER_STATUS_SHIPPED_ ? "已開設賣場" : "未開設賣場",
+          status === ORDER_STATUS_SHIPPED_ ||
+          status === ORDER_STATUS_COMPLETED_
+            ? "已開設賣場"
+            : "未開設賣場",
         shippedAt: row[18],
         reminderSentAt: row[19],
         cancelledAt: row[20],
@@ -596,6 +600,7 @@ function handleAdminUpdateOrderStatus_(data) {
     ORDER_STATUS_PENDING_,
     ORDER_STATUS_DEPOSIT_RECEIVED_,
     ORDER_STATUS_SHIPPED_,
+    ORDER_STATUS_COMPLETED_,
   ];
   if (!orderNo || allowed.indexOf(status) < 0)
     throw new Error("INVALID_ORDER_STATUS");
@@ -618,9 +623,18 @@ function handleAdminUpdateOrderStatus_(data) {
         .getDisplayValues()[0];
       previousStatus = normalizeOrderStatus_(row[15], row[17]);
       var shippingStatus =
-        status === ORDER_STATUS_SHIPPED_ ? "已開設賣場" : "未開設賣場";
+        status === ORDER_STATUS_SHIPPED_ ||
+        status === ORDER_STATUS_COMPLETED_
+          ? "已開設賣場"
+          : "未開設賣場";
       var shippedAt =
-        status === ORDER_STATUS_SHIPPED_ ? formatDateTime_(new Date()) : "";
+        status === ORDER_STATUS_SHIPPED_
+          ? previousStatus === ORDER_STATUS_SHIPPED_ && row[18]
+            ? row[18]
+            : formatDateTime_(new Date())
+          : status === ORDER_STATUS_COMPLETED_
+            ? row[18]
+            : "";
       sheet.getRange(rowNumber, 16).setValue(status);
       sheet
         .getRange(rowNumber, 18, 1, 2)
@@ -647,10 +661,15 @@ function handleAdminUpdateOrderStatus_(data) {
   }
 
   var shouldNotify =
-    previousStatus !== status &&
-    (status === ORDER_STATUS_DEPOSIT_RECEIVED_ ||
-      status === ORDER_STATUS_SHIPPED_);
+    previousStatus !== status && status !== ORDER_STATUS_COMPLETED_;
   var notificationSent = false;
+  if (shouldNotify && status === ORDER_STATUS_PENDING_) {
+    notificationSent = pushLineMessage_(
+      notificationTarget.lineUserId,
+      buildPendingStatusMessage_(notificationTarget),
+      "pending deposit " + orderNo,
+    );
+  }
   if (shouldNotify && status === ORDER_STATUS_DEPOSIT_RECEIVED_) {
     notificationSent = pushLineMessage_(
       notificationTarget.lineUserId,
@@ -670,6 +689,18 @@ function handleAdminUpdateOrderStatus_(data) {
   orderResult.notificationAttempted = shouldNotify;
   orderResult.notificationSent = notificationSent;
   return json_({ ok: true, order: orderResult });
+}
+
+function buildPendingStatusMessage_(order) {
+  return {
+    type: "text",
+    text:
+      "訂單狀態更新｜" +
+      order.orderNo +
+      "\n\n" +
+      (order.customerName || "訂購人") +
+      "您好，訂單狀態已更新為「待收訂金」。\n請依照訂單說明完成訂金，完成後回傳帳號後五碼供小幫手核對。",
+  };
 }
 
 function buildDepositReceivedMessage_(order) {
@@ -1056,6 +1087,7 @@ function buildOrderReminderText_(expiresAt) {
 function normalizeOrderStatus_(status, shippingStatus) {
   var value = String(status || "").trim();
   if (value === ORDER_STATUS_CANCELLED_) return ORDER_STATUS_CANCELLED_;
+  if (value === ORDER_STATUS_COMPLETED_) return ORDER_STATUS_COMPLETED_;
   if (
     ["已出貨", "已開設賣場"].indexOf(
       String(shippingStatus || "").trim(),

@@ -1,5 +1,6 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
 const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
+const ORDER_COMPLETED_STATUS = "訂單已完成";
 const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
@@ -165,7 +166,7 @@ function renderAdminOrders() {
   document.getElementById("unshippedCount").textContent = `${formatNumber(pending)} 筆待收訂金`;
   const orders = adminState.orders.filter((order) => {
     const status = normalizeAdminOrderStatus(order.status);
-    if (filter === "active" && status === "已取消") return false;
+    if (filter === "active" && ["已取消", ORDER_COMPLETED_STATUS].includes(status)) return false;
     if (!["active", "all"].includes(filter) && status !== filter) return false;
     const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName}`.toLowerCase();
     return !search || haystack.includes(search);
@@ -179,24 +180,37 @@ function normalizeAdminOrderStatus(status) {
 
 function renderAdminOrderCard(order) {
   const normalizedStatus = normalizeAdminOrderStatus(order.status);
-  const status = ["待收訂金", "已收到訂金", IOPEN_MALL_READY_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
-  const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", "已取消": "cancelled" }[status];
+  const status = ["待收訂金", "已收到訂金", IOPEN_MALL_READY_STATUS, ORDER_COMPLETED_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
+  const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", [ORDER_COMPLETED_STATUS]: "completed", "已取消": "cancelled" }[status];
   const items = Array.isArray(order.items) ? order.items : [];
+  const primaryAmount = status === "待收訂金"
+    ? { label: "訂金金額", value: order.depositTotal }
+    : [IOPEN_MALL_READY_STATUS, "已收到訂金"].includes(status)
+      ? { label: "剩餘金額", value: order.estimatedBalance }
+      : { label: "訂單金額", value: order.estimatedTotal };
+  const statusDetailRows = status === "待收訂金"
+    ? `<div><dt>訂單金額</dt><dd class="order-accent">NT $${formatNumber(order.estimatedTotal)}</dd></div><div><dt>剩餘金額</dt><dd>NT $${formatNumber(order.estimatedBalance)}</dd></div>`
+    : status === "已收到訂金"
+      ? `<div><dt>訂單金額</dt><dd class="order-accent">NT $${formatNumber(order.estimatedTotal)}</dd></div><div><dt>訂金金額</dt><dd>NT $${formatNumber(order.depositTotal)}</dd></div>`
+      : status === IOPEN_MALL_READY_STATUS
+        ? `<div><dt>訂單金額</dt><dd class="order-accent">NT $${formatNumber(order.estimatedTotal)}</dd></div>${order.shippedAt ? `<div><dt>賣場開設時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}`
+        : status === ORDER_COMPLETED_STATUS
+          ? `<div><dt>訂金金額</dt><dd>NT $${formatNumber(order.depositTotal)}</dd></div><div><dt>訂單金額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>`
+          : `<div><dt>訂單金額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>${order.cancelledAt ? `<div><dt>取消時間</dt><dd>${escapeHtml(order.cancelledAt)}</dd></div>` : ""}`;
   return `<article class="admin-order-card ${statusClass}" data-order-card="${escapeAttr(order.orderNo)}">
-    <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><b>${formatNumber(order.totalQty)} 件</b></header>
+    <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.lineDisplayName || order.customerName || "未命名")}</h3></div><b>${escapeHtml(order.orderNo)}</b></header>
     <div class="packing-items">${items.map((item) => `<div><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<b>× ${formatNumber(item.qty)}</b></div>`).join("") || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
-    <dl class="customer-details">
-      <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
-      <div><dt>LINE</dt><dd>${escapeHtml(order.lineDisplayName || "—")}</dd></div>
-      <div><dt>金額</dt><dd>商品款 NT$${formatNumber(order.estimatedTotal)}／訂金 50% NT$${formatNumber(order.depositTotal)}／剩餘商品款 NT$${formatNumber(order.estimatedBalance)}</dd></div>
-      <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
-      ${order.transferLast5 ? `<div><dt>匯款後五碼</dt><dd>${escapeHtml(order.transferLast5)}</dd></div>` : ""}
-      ${status === IOPEN_MALL_READY_STATUS && order.shippedAt ? `<div><dt>賣場開設時間</dt><dd>${escapeHtml(order.shippedAt)}</dd></div>` : ""}
-      ${status === "已取消" && order.cancelledAt ? `<div><dt>取消時間</dt><dd>${escapeHtml(order.cancelledAt)}</dd></div>` : ""}
-    </dl>
     ${order.reminderDue ? `<div class="order-reminder"><label>12 小時未收到訂金提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
-    <div class="order-status-actions">
-      <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
+    <div class="order-summary-box">
+      <div class="order-primary-amount"><span>${primaryAmount.label}</span><strong>NT $${formatNumber(primaryAmount.value)}</strong></div>
+      <dl class="customer-details">
+        <div><dt>訂購人</dt><dd>${escapeHtml(order.customerName)}　${escapeHtml(order.phone)}</dd></div>
+        <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
+        ${statusDetailRows}
+      </dl>
+      <div class="order-status-actions">
+        <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
+      </div>
     </div>
   </article>`;
 }
@@ -223,15 +237,16 @@ async function handleOrderAction(event) {
 function confirmOrderStatusChange(orderNo, previousStatus, nextStatus) {
   const dialog = document.getElementById("orderStatusConfirmDialog");
   const isCancellation = nextStatus === "已取消";
+  const isCompleted = nextStatus === ORDER_COMPLETED_STATUS;
   document.getElementById("orderStatusConfirmMessage").textContent = `訂單 ${orderNo} 將變更為以下狀態：`;
   document.getElementById("orderStatusPrevious").textContent = previousStatus;
   const next = document.getElementById("orderStatusNext");
   next.textContent = nextStatus;
   next.classList.toggle("is-cancelled", isCancellation);
   const note = document.getElementById("orderStatusConfirmNote");
-  note.textContent = isCancellation
-    ? "取消後無法從後台恢復，並會立即傳送取消通知給客戶。"
-    : "確認後將立即更新訂單；特定狀態會同步發送 LINE 通知。";
+  note.textContent = isCompleted
+    ? "確認後將立即更新訂單；此狀態不會發送 LINE 通知。"
+    : "確認後將立即更新訂單；並同步發送 LINE 通知。";
   note.classList.toggle("is-warning", isCancellation);
   const submit = document.getElementById("orderStatusConfirmSubmit");
   submit.textContent = isCancellation ? "確認取消訂單" : "確認變更";
