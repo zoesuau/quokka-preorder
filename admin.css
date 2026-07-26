@@ -46,14 +46,14 @@
 .admin-order-list { display: grid; gap: 12px; }
 .admin-order-card { overflow: hidden; border: 2px solid transparent; border-radius: 17px; box-shadow: 0 5px 14px rgba(38,76,96,.08); }
 .admin-order-card.pending { border-color: #ef9db2; background: #fff0f4; }
-.admin-order-card.deposit-received { border-color: #6eadd1; background: #e9f5fc; }
-.admin-order-card.shipped { border-color: #72ad88; background: #eaf6ee; }
-.admin-order-card.cancelled { border-color: #a9b0b4; background: #f0f1f2; }
+.admin-order-card.deposit-received { border-color: #e6b900; background: #fff9dc; }
+.admin-order-card.shipped { border-color: #f05e63; background: #fff0f0; }
+.admin-order-card.cancelled { border-color: #9aa2a6; background: #eef0f1; }
 .admin-order-card header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; color: white; }
 .admin-order-card.pending header { background: #e77694; }
-.admin-order-card.deposit-received header { background: #438ab4; }
-.admin-order-card.shipped header { background: #4f9468; }
-.admin-order-card.cancelled header { background: #7c858a; }
+.admin-order-card.deposit-received header { background: #e6b900; }
+.admin-order-card.shipped header { background: #f05e63; }
+.admin-order-card.cancelled header { background: #747d82; }
 .admin-order-card header > div { min-width: 0; }
 .admin-order-card header span { font-size: .67rem; font-weight: 700; letter-spacing: .08em; }
 .admin-order-card header h3 { margin: 1px 0; font-size: .98rem; }
@@ -69,11 +69,11 @@
 .customer-details > div { display: grid; grid-template-columns: 58px 1fr; gap: 8px; }
 .customer-details dt { color: var(--muted); }
 .customer-details dd { margin: 0; overflow-wrap: anywhere; }
-.order-status-actions { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 9px; padding: 0 14px 14px; }
+.order-status-actions { display: grid; padding: 0 14px 14px; }
 .order-status-actions label { display: grid; gap: 4px; color: var(--muted); font-size: .68rem; font-weight: 700; }
-.order-status-actions select, .cancel-order-action { min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; font-weight: 700; }
-.cancel-order-action { align-self: end; border-color: #a9b0b4; background: #7c858a; color: white; }
-.cancel-order-action:disabled { opacity: .62; }
+.order-status-actions select { min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; font-weight: 700; }
+.status-cancel-option, .order-status-actions select[data-selected-status="已取消"] { color: #c9363e; font-weight: 800; }
+.order-status-actions select[data-selected-status="已取消"]:disabled { opacity: 1; -webkit-text-fill-color: #c9363e; }
 .order-reminder { display: grid; gap: 8px; margin: 0 14px 12px; padding: 11px; border: 1px solid #e5b85c; border-radius: 12px; background: #fff8df; }
 .order-reminder label { display: grid; gap: 6px; color: #765716; font-size: .72rem; font-weight: 700; }
 .order-reminder textarea { width: 100%; padding: 9px; resize: vertical; border: 1px solid #dfc478; border-radius: 9px; background: white; font: inherit; line-height: 1.55; }
@@ -109,6 +109,21 @@
 .admin-card-actions .toggle-off { color: var(--peach-dark); }
 .editor-dialog { padding: 20px; }
 .editor-dialog #productForm { margin-top: 15px; }
+.status-confirm-dialog { width: min(calc(100% - 32px), 420px); padding: 0; overflow: hidden; border: 0; border-radius: 20px; background: var(--paper); box-shadow: 0 24px 70px rgba(31,43,50,.28); }
+.status-confirm-dialog::backdrop { background: rgba(31,43,50,.64); backdrop-filter: blur(5px); }
+.status-confirm-dialog form { padding: 24px; }
+.status-confirm-dialog h2 { margin: 5px 0 9px; font-size: 1.25rem; }
+.status-confirm-dialog form > p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.65; }
+.status-change-preview { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 9px; align-items: center; margin: 18px 0 12px; padding: 13px; border-radius: 13px; background: #edf3f5; font-size: .8rem; text-align: center; }
+.status-change-preview span { color: var(--muted); }
+.status-change-preview b { color: #8b969b; }
+.status-change-preview strong { color: #47748e; }
+.status-change-preview strong.is-cancelled { color: #c9363e; }
+.status-confirm-note.is-warning { color: #b92f37 !important; font-weight: 700; }
+.status-confirm-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 9px; margin-top: 20px; }
+.status-confirm-actions button { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: white; color: var(--ink); font-weight: 800; }
+.status-confirm-actions .status-confirm-submit { border-color: #47748e; background: #47748e; color: white; }
+.status-confirm-actions .status-confirm-submit.is-cancelled { border-color: #c9363e; background: #c9363e; }
 .image-uploader { position: relative; display: grid; overflow: hidden; height: 220px; place-items: center; border: 2px dashed #86aabd; border-radius: 16px; background: #edf5f8; color: var(--muted); cursor: pointer; }
 .image-uploader img { position: absolute; width: 100%; height: 100%; object-fit: contain; }
 .image-uploader span { z-index: 1; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.9); font-size: .78rem; font-weight: 700; }

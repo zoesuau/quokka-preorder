@@ -196,46 +196,78 @@ function renderAdminOrderCard(order) {
     </dl>
     ${order.reminderDue ? `<div class="order-reminder"><label>12 小時未收到訂金提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
     <div class="order-status-actions">
-      <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option></select></label>
-      <button class="cancel-order-action" type="button" data-cancel-order="${escapeAttr(order.orderNo)}" ${status === "已取消" ? "disabled" : ""}>${status === "已取消" ? "訂單已取消" : "取消訂單"}</button>
+      <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
     </div>
   </article>`;
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-cancel-order], [data-reminder-order]");
+  const button = event.target.closest("[data-reminder-order]");
   if (!button) return;
-  if (button.dataset.cancelOrder && !window.confirm(`確定要取消訂單 ${button.dataset.cancelOrder} 嗎？\n取消後會立即傳送取消通知給客戶。`)) return;
   button.disabled = true;
   try {
     const card = button.closest("[data-order-card]");
-    const payload = button.dataset.cancelOrder
-      ? { action: "adminCancelOrder", orderNo: button.dataset.cancelOrder }
-      : { action: "adminSendOrderReminder", orderNo: button.dataset.reminderOrder, message: card.querySelector(".order-reminder textarea").value.trim() };
-    if (payload.action === "adminSendOrderReminder" && !payload.message) return showToast("請輸入提醒內容");
+    const payload = { action: "adminSendOrderReminder", orderNo: button.dataset.reminderOrder, message: card.querySelector(".order-reminder textarea").value.trim() };
+    if (!payload.message) return showToast("請輸入提醒內容");
     const result = await adminPost(payload);
     if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
     const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
     if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
     renderAdminOrders();
-    showToast(payload.action === "adminCancelOrder" ? (result.order.notificationSent ? "訂單已取消並發送通知" : "訂單已取消，但 LINE 通知未送達") : "提醒訊息已送出");
+    showToast("提醒訊息已送出");
   } catch (error) {
     showToast("訂單操作失敗，請稍後再試");
   } finally { button.disabled = false; }
+}
+
+function confirmOrderStatusChange(orderNo, previousStatus, nextStatus) {
+  const dialog = document.getElementById("orderStatusConfirmDialog");
+  const isCancellation = nextStatus === "已取消";
+  document.getElementById("orderStatusConfirmMessage").textContent = `訂單 ${orderNo} 將變更為以下狀態：`;
+  document.getElementById("orderStatusPrevious").textContent = previousStatus;
+  const next = document.getElementById("orderStatusNext");
+  next.textContent = nextStatus;
+  next.classList.toggle("is-cancelled", isCancellation);
+  const note = document.getElementById("orderStatusConfirmNote");
+  note.textContent = isCancellation
+    ? "取消後無法從後台恢復，並會立即傳送取消通知給客戶。"
+    : "確認後將立即更新訂單；特定狀態會同步發送 LINE 通知。";
+  note.classList.toggle("is-warning", isCancellation);
+  const submit = document.getElementById("orderStatusConfirmSubmit");
+  submit.textContent = isCancellation ? "確認取消訂單" : "確認變更";
+  submit.classList.toggle("is-cancelled", isCancellation);
+  dialog.returnValue = "";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+    dialog.showModal();
+  });
 }
 
 async function handleOrderStatusChange(event) {
   const select = event.target.closest("[data-status-order]");
   if (!select) return;
   const previous = normalizeAdminOrderStatus(adminState.orders.find((order) => order.orderNo === select.dataset.statusOrder)?.status || "待收訂金");
+  const next = select.value;
   select.disabled = true;
+  const confirmed = await confirmOrderStatusChange(select.dataset.statusOrder, previous, next);
+  if (!confirmed) {
+    select.value = previous;
+    select.disabled = false;
+    return;
+  }
   try {
-    const result = await adminPost({ action: "adminUpdateOrderStatus", orderNo: select.dataset.statusOrder, status: select.value });
+    const result = await adminPost(next === "已取消"
+      ? { action: "adminCancelOrder", orderNo: select.dataset.statusOrder }
+      : { action: "adminUpdateOrderStatus", orderNo: select.dataset.statusOrder, status: next });
     if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
     const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
     if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
     renderAdminOrders();
-    if (result.order.notificationAttempted) {
+    if (next === "已取消") {
+      showToast(result.order.notificationSent
+        ? "訂單已取消並發送通知"
+        : "訂單已取消，但 LINE 通知未送達");
+    } else if (result.order.notificationAttempted) {
       showToast(result.order.notificationSent
         ? `訂單已改為「${result.order.status}」並發送通知`
         : `訂單已改為「${result.order.status}」，但 LINE 通知未送達`);
