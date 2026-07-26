@@ -81,11 +81,11 @@
 .order-status-actions select { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; font-weight: 700; }
 .status-cancel-option, .order-status-actions select[data-selected-status="已取消"] { color: #c9363e; font-weight: 800; }
 .order-status-actions select[data-selected-status="已取消"]:disabled { opacity: 1; -webkit-text-fill-color: #c9363e; }
-.order-reminder { display: grid; gap: 8px; margin: 0 14px 12px; padding: 11px; border: 1px solid #e5b85c; border-radius: 12px; background: #fff8df; }
-.order-reminder label { display: grid; gap: 6px; color: #765716; font-size: .72rem; font-weight: 700; }
-.order-reminder textarea { width: 100%; padding: 9px; resize: vertical; border: 1px solid #dfc478; border-radius: 9px; background: white; font: inherit; line-height: 1.55; }
-.order-reminder button { padding: 9px; border: 0; border-radius: 9px; background: #b98219; color: white; font-weight: 700; }
-.reminder-sent { margin: 0 14px 12px; color: var(--muted); font-size: .7rem; }
+.order-reminder { display: grid; gap: 10px; margin-top: 12px; padding: 11px; border: 1px solid var(--order-status-color); border-radius: 6px; background: #fff; }
+.order-reminder label { display: grid; gap: 7px; color: #4b4b4b; font-size: .76rem; font-weight: 700; }
+.order-reminder textarea { width: 100%; min-height: 102px; padding: 9px; resize: vertical; border: 1px solid var(--order-status-color); border-radius: 6px; background: white; color: var(--ink); font: inherit; font-weight: 600; line-height: 1.45; }
+.order-reminder button { min-height: 42px; padding: 9px; border: 0; border-radius: 18px; background: var(--order-status-color); color: white; font-weight: 700; }
+.reminder-sent { margin: 10px 0 0; color: var(--muted); font-size: .7rem; }
 .empty-orders { padding: 24px 10px; color: var(--muted); font-size: .78rem; text-align: center; }
 .settings-card { margin: 14px 0; padding: 0 15px; border: 1px solid var(--line); border-radius: 16px; background: white; }
 .settings-card summary { padding: 15px 0; font-weight: 700; cursor: pointer; }

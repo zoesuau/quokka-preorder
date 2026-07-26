@@ -45,6 +45,7 @@ var ORDER_HEADERS_ = [
   "shippedAt",
   "reminderSentAt",
   "cancelledAt",
+  "mallReminderSentAt",
 ];
 
 var ORDER_STATUS_PENDING_ = "待收訂金";
@@ -96,6 +97,8 @@ function doPost(e) {
     if (action === "adminCancelOrder") return handleAdminCancelOrder_(data);
     if (action === "adminSendOrderReminder")
       return handleAdminSendOrderReminder_(data);
+    if (action === "adminSendMallExpiryReminder")
+      return handleAdminSendMallExpiryReminder_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
     if (action === "adminUploadProductImage")
@@ -553,6 +556,10 @@ function readAdminOrders_() {
       var expiresAt = createdAt
         ? new Date(createdAt.getTime() + ORDER_EXPIRES_DISPLAY_HOURS_ * 3600000)
         : null;
+      var mallDeadline =
+        status === ORDER_STATUS_SHIPPED_
+          ? buildMallPaymentDeadline_(row[18])
+          : null;
       return {
         orderNo: row[0],
         createdAt: row[1],
@@ -578,12 +585,20 @@ function readAdminOrders_() {
         shippedAt: row[18],
         reminderSentAt: row[19],
         cancelledAt: row[20],
+        mallReminderSentAt: row[21],
         reminderDue:
           status === ORDER_STATUS_PENDING_ &&
           ageHours >= ORDER_REMINDER_HOURS_ &&
           ageHours < ORDER_AUTO_CANCEL_HOURS_ &&
           !String(row[19] || "").trim(),
         reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : "",
+        mallReminderDue:
+          !!mallDeadline &&
+          mallDeadline.reminderDue &&
+          !String(row[21] || "").trim(),
+        mallReminderMessage: mallDeadline
+          ? buildMallExpiryReminderText_()
+          : "",
       };
     })
     .reverse()
@@ -894,6 +909,57 @@ function handleAdminSendOrderReminder_(data) {
   });
 }
 
+function handleAdminSendMallExpiryReminder_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  var message = cleanText_(data.message, 500);
+  if (!orderNo || !message) throw new Error("INVALID_REMINDER");
+  var lock = LockService.getScriptLock();
+  var target;
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var rowNumber = findOrderRow_(sheet, orderNo);
+    if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
+    var row = sheet
+      .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
+    if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_SHIPPED_)
+      throw new Error("INVALID_ORDER_STATUS");
+    var mallDeadline = buildMallPaymentDeadline_(row[18]);
+    if (
+      !mallDeadline ||
+      !mallDeadline.reminderDue ||
+      String(row[21] || "").trim()
+    )
+      throw new Error("REMINDER_NOT_DUE");
+    target = { lineUserId: row[2], orderNo: row[0] };
+  } finally {
+    lock.releaseLock();
+  }
+  if (
+    !pushLineMessage_(
+      target.lineUserId,
+      { type: "text", text: message },
+      "mall expiry reminder " + target.orderNo,
+    )
+  )
+    throw new Error("LINE_PUSH_FAILED");
+  sheet = spreadsheet_().getSheetByName("Preorders");
+  rowNumber = findOrderRow_(sheet, orderNo);
+  var mallReminderSentAt = formatDateTime_(new Date());
+  if (rowNumber) sheet.getRange(rowNumber, 22).setValue(mallReminderSentAt);
+  return json_({
+    ok: true,
+    order: {
+      orderNo: orderNo,
+      mallReminderDue: false,
+      mallReminderSentAt: mallReminderSentAt,
+    },
+  });
+}
+
 function setupPreorderAutomationTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
     if (trigger.getHandlerFunction() === "processExpiredPreorders")
@@ -1072,15 +1138,18 @@ function buildOrderCancellationMessage_(order) {
 }
 
 function buildOrderReminderText_(expiresAt) {
-  var expiryText = Utilities.formatDate(
-    expiresAt,
-    Session.getScriptTimeZone(),
-    "yyyy/MM/dd HH:mm",
-  );
   return (
-    "溫馨提醒：此預訂訂單將於「" +
-    expiryText +
-    "」過期，記得匯款訂金金額完成訂購喔～^_^\n若您已匯款成功，請回傳帳號後五碼，方便小幫手對帳喔"
+    "溫馨提醒：此預訂訂單將於12小時後逾期，\n" +
+    "記得匯款訂金金額完成訂購喔～^_^\n" +
+    "若您已匯款成功，請回傳帳號後五碼，進入下一階段手續喔"
+  );
+}
+
+function buildMallExpiryReminderText_() {
+  return (
+    "溫馨提醒：\n" +
+    "此訂單將24小時後逾期，請務必在期限內至賣場下標。\n" +
+    "訂單取消後訂金不退還喔～^_^"
   );
 }
 
@@ -1131,6 +1200,9 @@ function buildMallPaymentDeadline_(shippedAt) {
   return {
     display: Utilities.formatDate(displayDate, timezone, "yyyy/MM/dd") + " 24:00",
     expired: new Date().getTime() >= deadline.getTime(),
+    reminderDue:
+      new Date().getTime() >= deadline.getTime() - 24 * 60 * 60 * 1000 &&
+      new Date().getTime() < deadline.getTime(),
   };
 }
 

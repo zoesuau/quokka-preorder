@@ -200,7 +200,6 @@ function renderAdminOrderCard(order) {
   return `<article class="admin-order-card ${statusClass}" data-order-card="${escapeAttr(order.orderNo)}">
     <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.lineDisplayName || order.customerName || "未命名")}</h3></div><b>${escapeHtml(order.orderNo)}</b></header>
     <div class="packing-items">${items.map((item) => `<div><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<b>× ${formatNumber(item.qty)}</b></div>`).join("") || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
-    ${order.reminderDue ? `<div class="order-reminder"><label>12 小時未收到訂金提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
     <div class="order-summary-box">
       <div class="order-primary-amount"><span>${primaryAmount.label}</span><strong>NT $${formatNumber(primaryAmount.value)}</strong></div>
       <dl class="customer-details">
@@ -211,17 +210,25 @@ function renderAdminOrderCard(order) {
       <div class="order-status-actions">
         <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
       </div>
+      ${order.reminderDue ? `<div class="order-reminder"><label>12小時未收到訂金通知<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
+      ${order.mallReminderDue ? `<div class="order-reminder"><label>七天賣場取消通知<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">七天賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
     </div>
   </article>`;
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-reminder-order]");
+  const button = event.target.closest("[data-reminder-order], [data-mall-reminder-order]");
   if (!button) return;
   button.disabled = true;
   try {
     const card = button.closest("[data-order-card]");
-    const payload = { action: "adminSendOrderReminder", orderNo: button.dataset.reminderOrder, message: card.querySelector(".order-reminder textarea").value.trim() };
+    const isMallReminder = Boolean(button.dataset.mallReminderOrder);
+    const reminder = button.closest(".order-reminder");
+    const payload = {
+      action: isMallReminder ? "adminSendMallExpiryReminder" : "adminSendOrderReminder",
+      orderNo: isMallReminder ? button.dataset.mallReminderOrder : button.dataset.reminderOrder,
+      message: reminder.querySelector("textarea").value.trim(),
+    };
     if (!payload.message) return showToast("請輸入提醒內容");
     const result = await adminPost(payload);
     if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
