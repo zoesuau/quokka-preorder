@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260726-expiry-reminders" />
+    <link rel="stylesheet" href="admin.css?v=20260729-shortage" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260726-expiry-reminders" defer></script>
+    <script src="admin.js?v=20260729-shortage" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -166,6 +166,20 @@
         <div class="status-confirm-actions">
           <button type="submit" value="cancel">返回</button>
           <button class="status-confirm-submit" id="orderStatusConfirmSubmit" type="submit" value="confirm">確認變更</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="shortage-dialog" id="shortageDialog" aria-labelledby="shortageDialogTitle">
+      <form id="shortageForm">
+        <p class="eyebrow">OUT OF STOCK</p>
+        <h2 id="shortageDialogTitle">取消缺貨品項</h2>
+        <p>只能取消缺貨商品，不會修改原始訂單或已收訂金。</p>
+        <input id="shortageOrderNo" type="hidden" />
+        <div class="shortage-item-list" id="shortageItemList"></div>
+        <div class="shortage-preview" id="shortagePreview"></div>
+        <div class="status-confirm-actions">
+          <button id="shortageDialogClose" type="button">返回</button>
+          <button class="status-confirm-submit is-cancelled" id="shortageSubmit" type="submit">確認取消並通知</button>
         </div>
       </form>
     </dialog>

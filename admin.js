@@ -47,6 +47,9 @@ function bindAdminEvents() {
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
   document.getElementById("adminOrderList").addEventListener("click", handleOrderAction);
   document.getElementById("adminOrderList").addEventListener("change", handleOrderStatusChange);
+  document.getElementById("shortageForm").addEventListener("submit", submitShortageAdjustment);
+  document.getElementById("shortageItemList").addEventListener("input", updateShortagePreview);
+  document.getElementById("shortageDialogClose").addEventListener("click", () => document.getElementById("shortageDialog").close());
   document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
   document.getElementById("orderStatusFilter").addEventListener("change", renderAdminOrders);
   document.getElementById("bankQrInput").addEventListener("change", uploadBankQr);
@@ -183,6 +186,8 @@ function renderAdminOrderCard(order) {
   const status = ["待收訂金", "已收到訂金", IOPEN_MALL_READY_STATUS, ORDER_COMPLETED_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
   const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", [ORDER_COMPLETED_STATUS]: "completed", "已取消": "cancelled" }[status];
   const items = Array.isArray(order.items) ? order.items : [];
+  const shortageHistory = Array.isArray(order.shortageAdjustments) ? order.shortageAdjustments : [];
+  const canAdjustShortage = ["已收到訂金", IOPEN_MALL_READY_STATUS].includes(status) && items.length > 0;
   const primaryAmount = status === "待收訂金"
     ? { label: "訂金金額", value: order.depositTotal }
     : [IOPEN_MALL_READY_STATUS, "已收到訂金"].includes(status)
@@ -209,7 +214,9 @@ function renderAdminOrderCard(order) {
       </dl>
       <div class="order-status-actions">
         <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
+        ${canAdjustShortage ? `<button class="shortage-action" type="button" data-shortage-order="${escapeAttr(order.orderNo)}">取消缺貨品項</button>` : ""}
       </div>
+      ${shortageHistory.length ? renderShortageHistory(order, shortageHistory) : ""}
       ${order.reminderDue ? `<div class="order-reminder"><label>12小時未收到訂金通知<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
       ${order.mallReminderDue ? `<div class="order-reminder"><label>七天賣場取消通知<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">七天賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
     </div>
@@ -217,8 +224,16 @@ function renderAdminOrderCard(order) {
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-reminder-order], [data-mall-reminder-order]");
+  const button = event.target.closest("[data-reminder-order], [data-mall-reminder-order], [data-shortage-order], [data-refund-order]");
   if (!button) return;
+  if (button.dataset.shortageOrder) {
+    openShortageDialog(button.dataset.shortageOrder);
+    return;
+  }
+  if (button.dataset.refundOrder) {
+    await confirmCashRefund(button);
+    return;
+  }
   button.disabled = true;
   try {
     const card = button.closest("[data-order-card]");
@@ -239,6 +254,114 @@ async function handleOrderAction(event) {
   } catch (error) {
     showToast("訂單操作失敗，請稍後再試");
   } finally { button.disabled = false; }
+}
+
+function renderShortageHistory(order, history) {
+  const latest = history[history.length - 1] || {};
+  const refundDue = Number(order.cashRefundDue || 0);
+  const paymentLine = refundDue > 0
+    ? order.cashRefundedAt
+      ? `<strong class="refund-complete">已退現金 NT $${formatNumber(refundDue)}</strong><small>${escapeHtml(order.cashRefundedAt)}</small>`
+      : `<strong class="refund-pending">待退現金 NT $${formatNumber(refundDue)}</strong><button type="button" data-refund-order="${escapeAttr(order.orderNo)}">確認已退現金</button>`
+    : `<strong>後續應付 NT $${formatNumber(order.estimatedBalance)}</strong>`;
+  return `<section class="shortage-history">
+    <div><span>缺貨調整</span><b>${escapeHtml(order.shortageAdjustedAt || latest.adjustedAt || "")}</b></div>
+    <p>原總額 NT $${formatNumber(order.originalEstimatedTotal)} → 已扣除 NT $${formatNumber(Number(order.originalEstimatedTotal || 0) - Number(order.estimatedTotal || 0))} → 新總額 NT $${formatNumber(order.estimatedTotal)}</p>
+    <div class="shortage-payment">${paymentLine}</div>
+    <small>${order.shortageNotificationSentAt ? `LINE 通知已於 ${escapeHtml(order.shortageNotificationSentAt)} 送出` : "LINE 通知未送達"}</small>
+  </section>`;
+}
+
+function openShortageDialog(orderNo) {
+  const order = adminState.orders.find((entry) => entry.orderNo === orderNo);
+  if (!order) return;
+  document.getElementById("shortageOrderNo").value = orderNo;
+  document.getElementById("shortageItemList").innerHTML = order.items.map((item, index) => {
+    const unitPrice = Number(item.unitPriceTwd || (Number(item.subtotalTwd || 0) / Number(item.qty || 1)) || 0);
+    return `<label class="shortage-item">
+      <input type="checkbox" data-shortage-check="${index}" />
+      <span><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<em>NT $${formatNumber(unitPrice)}／件</em></span>
+      <input type="number" data-shortage-qty="${index}" min="1" max="${Number(item.qty)}" value="${Number(item.qty)}" inputmode="numeric" disabled aria-label="${escapeAttr(item.name)}取消數量" />
+      <b>／${formatNumber(item.qty)}</b>
+    </label>`;
+  }).join("");
+  document.querySelectorAll("[data-shortage-check]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const qty = document.querySelector(`[data-shortage-qty="${checkbox.dataset.shortageCheck}"]`);
+      qty.disabled = !checkbox.checked;
+      updateShortagePreview();
+    });
+  });
+  updateShortagePreview();
+  document.getElementById("shortageDialog").showModal();
+}
+
+function getShortageSelection() {
+  return [...document.querySelectorAll("[data-shortage-check]:checked")].map((checkbox) => ({
+    index: Number(checkbox.dataset.shortageCheck),
+    qty: Number(document.querySelector(`[data-shortage-qty="${checkbox.dataset.shortageCheck}"]`).value),
+  }));
+}
+
+function updateShortagePreview() {
+  const order = adminState.orders.find((entry) => entry.orderNo === document.getElementById("shortageOrderNo").value);
+  if (!order) return;
+  const cancellations = getShortageSelection();
+  const cancelledAmount = cancellations.reduce((sum, entry) => {
+    const item = order.items[entry.index];
+    const unitPrice = Number(item?.unitPriceTwd || (Number(item?.subtotalTwd || 0) / Number(item?.qty || 1)) || 0);
+    return sum + unitPrice * Math.max(0, Math.min(entry.qty, Number(item?.qty || 0)));
+  }, 0);
+  const adjustedTotal = Math.max(0, Number(order.estimatedTotal || 0) - cancelledAmount);
+  const balance = Math.max(0, adjustedTotal - Number(order.depositTotal || 0));
+  const refund = Math.max(0, Number(order.depositTotal || 0) - adjustedTotal);
+  const remainingQty = order.items.reduce((sum, item) => sum + Number(item.qty || 0), 0) - cancellations.reduce((sum, entry) => sum + entry.qty, 0);
+  document.getElementById("shortagePreview").innerHTML = cancellations.length
+    ? `<div><span>本次扣除</span><strong>NT $${formatNumber(cancelledAmount)}</strong></div><div><span>調整後總額</span><strong>NT $${formatNumber(adjustedTotal)}</strong></div><div><span>${refund > 0 ? "待退現金" : "後續應付"}</span><strong>NT $${formatNumber(refund || balance)}</strong></div>${remainingQty <= 0 ? `<p>所有品項都將取消，此訂單會改為「已取消」。</p>` : ""}`
+    : `<p>請勾選現場缺貨的商品。</p>`;
+  document.getElementById("shortageSubmit").disabled = !cancellations.length;
+}
+
+async function submitShortageAdjustment(event) {
+  event.preventDefault();
+  const orderNo = document.getElementById("shortageOrderNo").value;
+  const cancellations = getShortageSelection();
+  if (!cancellations.length) return;
+  const submit = document.getElementById("shortageSubmit");
+  submit.disabled = true;
+  submit.textContent = "處理中…";
+  try {
+    const result = await adminPost({ action: "adminAdjustOrderShortage", orderNo, cancellations });
+    if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
+    const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
+    if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
+    document.getElementById("shortageDialog").close();
+    await loadAdminProducts();
+    showToast(result.order.notificationSent ? "缺貨品項已取消並發送通知" : "缺貨品項已取消，但 LINE 通知未送達");
+  } catch (error) {
+    console.error(error);
+    showToast("缺貨調整失敗，請重新確認數量");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "確認取消並通知";
+  }
+}
+
+async function confirmCashRefund(button) {
+  const orderNo = button.dataset.refundOrder;
+  if (!window.confirm(`確認訂單 ${orderNo} 已退還現金？`)) return;
+  button.disabled = true;
+  try {
+    const result = await adminPost({ action: "adminConfirmCashRefund", orderNo });
+    if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
+    const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
+    if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
+    renderAdminOrders();
+    showToast("已記錄現金退款");
+  } catch (error) {
+    button.disabled = false;
+    showToast("退款紀錄更新失敗");
+  }
 }
 
 function confirmOrderStatusChange(orderNo, previousStatus, nextStatus) {

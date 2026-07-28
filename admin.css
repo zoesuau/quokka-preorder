@@ -81,6 +81,16 @@
 .order-status-actions select { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; font-weight: 700; }
 .status-cancel-option, .order-status-actions select[data-selected-status="已取消"] { color: #c9363e; font-weight: 800; }
 .order-status-actions select[data-selected-status="已取消"]:disabled { opacity: 1; -webkit-text-fill-color: #c9363e; }
+.order-status-actions .shortage-action { min-height: 42px; margin-top: 9px; border: 1px solid #c9363e; border-radius: 11px; background: #fff4f4; color: #b92f37; font-weight: 800; }
+.shortage-history { display: grid; gap: 7px; margin-top: 11px; padding: 11px; border-radius: 11px; background: #fff6e5; color: #5d5141; font-size: .72rem; }
+.shortage-history > div:first-child { display: flex; justify-content: space-between; gap: 8px; color: #8a7354; }
+.shortage-history p { margin: 0; line-height: 1.55; }
+.shortage-history > small { color: #8a7354; }
+.shortage-payment { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding-top: 7px; border-top: 1px solid #ead8b6; }
+.shortage-payment small { width: 100%; color: #8a7354; }
+.shortage-payment button { padding: 7px 10px; border: 0; border-radius: 9px; background: #b92f37; color: white; font-weight: 800; }
+.refund-pending { color: #b92f37; }
+.refund-complete { color: #3f9363; }
 .order-reminder { display: grid; gap: 10px; margin-top: 12px; padding: 11px; border: 1px solid var(--order-status-color); border-radius: 6px; background: #fff; }
 .order-reminder label { display: grid; gap: 7px; color: #4b4b4b; font-size: .76rem; font-weight: 700; }
 .order-reminder textarea { width: 100%; min-height: 102px; padding: 9px; resize: vertical; border: 1px solid var(--order-status-color); border-radius: 6px; background: white; color: var(--ink); font: inherit; font-weight: 600; line-height: 1.45; }
@@ -132,6 +142,23 @@
 .status-confirm-actions button { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: white; color: var(--ink); font-weight: 800; }
 .status-confirm-actions .status-confirm-submit { border-color: #47748e; background: #47748e; color: white; }
 .status-confirm-actions .status-confirm-submit.is-cancelled { border-color: #c9363e; background: #c9363e; }
+.shortage-dialog { width: min(calc(100% - 24px), 520px); max-height: calc(100dvh - 32px); padding: 0; overflow: auto; border: 0; border-radius: 20px; background: var(--paper); box-shadow: 0 24px 70px rgba(31,43,50,.28); }
+.shortage-dialog::backdrop { background: rgba(31,43,50,.64); backdrop-filter: blur(5px); }
+.shortage-dialog form { padding: 22px; }
+.shortage-dialog h2 { margin: 5px 0 7px; font-size: 1.25rem; }
+.shortage-dialog form > p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.shortage-item-list { display: grid; gap: 8px; margin-top: 16px; }
+.shortage-item { display: grid; grid-template-columns: auto minmax(0,1fr) 60px auto; gap: 8px; align-items: center; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.shortage-item > input[type="checkbox"] { width: 20px; height: 20px; accent-color: #c9363e; }
+.shortage-item > span { display: grid; min-width: 0; }
+.shortage-item strong { overflow: hidden; font-size: .82rem; white-space: nowrap; text-overflow: ellipsis; }
+.shortage-item small, .shortage-item em { color: var(--muted); font-size: .68rem; font-style: normal; }
+.shortage-item > input[type="number"] { min-width: 0; width: 60px; padding: 8px 5px; border: 1px solid var(--line); border-radius: 8px; text-align: center; }
+.shortage-item > b { color: var(--muted); font-size: .72rem; }
+.shortage-preview { display: grid; gap: 6px; margin-top: 13px; padding: 12px; border-radius: 12px; background: #edf3f5; font-size: .76rem; }
+.shortage-preview > div { display: flex; justify-content: space-between; gap: 10px; }
+.shortage-preview p { margin: 3px 0 0; color: #b92f37; font-weight: 800; line-height: 1.45; }
+.shortage-preview .status-confirm-submit:disabled, .status-confirm-actions button:disabled { opacity: .5; }
 .image-uploader { position: relative; display: grid; overflow: hidden; height: 220px; place-items: center; border: 2px dashed #86aabd; border-radius: 16px; background: #edf5f8; color: var(--muted); cursor: pointer; }
 .image-uploader img { position: absolute; width: 100%; height: 100%; object-fit: contain; }
 .image-uploader span { z-index: 1; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.9); font-size: .78rem; font-weight: 700; }

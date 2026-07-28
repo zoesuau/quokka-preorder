@@ -417,7 +417,10 @@ function renderOrder(order) {
       ? `<p class="mall-payment-expired">付款期限為 ${escapeHtml(order.mallPaymentDueText)}，如仍需購買請聯絡客服。</p>`
       : `<p>請於 ${escapeHtml(order.mallPaymentDueText)} 前完成付款</p>${order.iopenMallUrl ? `<a class="payment-action" href="${escapeAttr(order.iopenMallUrl)}" target="_blank" rel="noopener noreferrer">前往 iOPEN Mall 賣場</a>` : ""}`}</div>`
     : "";
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status ${order.mallPaymentExpired ? "overdue" : ""}">${escapeHtml(displayStatus)}</span></div><pre>${escapeHtml(order.itemsSummary)}</pre><div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>本次訂金</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>回國後商品款</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${mallAction}</article>`;
+  const shortageNotice = order.shortageAdjustedAt
+    ? `<div class="order-shortage-notice"><strong>已完成缺貨調整</strong><span>原總額 NT$${formatNumber(order.originalEstimatedTotal)} → 調整後 NT$${formatNumber(order.estimatedTotal)}</span>${Number(order.cashRefundDue || 0) > 0 ? `<span>${order.cashRefundedAt ? "已退現金" : order.status === "已取消" ? "待退款" : "出貨時待退現金"} NT$${formatNumber(order.cashRefundDue)}</span>` : ""}</div>`
+    : "";
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status ${order.mallPaymentExpired ? "overdue" : ""}">${escapeHtml(displayStatus)}</span></div><pre>${escapeHtml(order.itemsSummary || "品項已全數取消")}</pre>${shortageNotice}<div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>已付訂金</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>後續應付</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${mallAction}</article>`;
 }
 
 async function apiPost(payload) {

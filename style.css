@@ -123,6 +123,8 @@ dialog::backdrop { background: rgba(55,43,36,.52); backdrop-filter: blur(3px); }
 .order-status { flex: none; align-self: start; padding: 5px 9px; border-radius: 999px; background: #dcece6; color: var(--sage); font-size: .72rem; font-weight: 700; }
 .order-status.overdue { background: #f3e4e1; color: #9a3e36; }
 .order-card pre { margin: 12px 0; color: var(--muted); font: inherit; font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
+.order-shortage-notice { display: grid; gap: 3px; margin: 0 0 12px; padding: 10px 11px; border-radius: 11px; background: #fff3df; color: #795d34; font-size: .72rem; }
+.order-shortage-notice strong { color: #b35d35; }
 .order-money { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding-top: 11px; border-top: 1px solid var(--line); }
 .order-money div { display: grid; gap: 3px; }
 .order-money span { color: var(--muted); font-size: .66rem; }
