@@ -46,9 +46,18 @@ var ORDER_HEADERS_ = [
   "reminderSentAt",
   "cancelledAt",
   "mallReminderSentAt",
+  "originalItemsJson",
+  "originalEstimatedTotal",
+  "shortageAdjustmentsJson",
+  "shortageAdjustedAt",
+  "cashRefundDue",
+  "cashRefundedAt",
+  "shortageNotificationSentAt",
+  "paymentReportedAt",
 ];
 
 var ORDER_STATUS_PENDING_ = "待收訂金";
+var ORDER_STATUS_PAYMENT_REPORTED_ = "待確認訂金";
 var ORDER_STATUS_DEPOSIT_RECEIVED_ = "已收到訂金";
 var ORDER_STATUS_SHIPPED_ = "已開設 iOPEN Mall 賣場";
 var ORDER_STATUS_SHIPPED_LEGACY_ = "已出貨";
@@ -57,6 +66,19 @@ var ORDER_STATUS_CANCELLED_ = "已取消";
 var ORDER_REMINDER_HOURS_ = 12;
 var ORDER_EXPIRES_DISPLAY_HOURS_ = 24;
 var ORDER_AUTO_CANCEL_HOURS_ = 25;
+var ORDER_PAYMENT_DEADLINE_HOURS_ = 24;
+
+var LINE_EVENT_HEADERS_ = [
+  "webhookEventId",
+  "lineUserId",
+  "receivedAt",
+  "messageType",
+  "messageId",
+  "textPreview",
+  "matchedOrderNo",
+  "reviewStatus",
+  "reviewedAt",
+];
 
 var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
@@ -89,12 +111,20 @@ function doPost(e) {
     if (action === "createPreorder") return handleCreatePreorder_(data);
     if (action === "confirmPreorderPayment")
       return handleConfirmPreorderPayment_(data);
+    if (action === "recordLineWebhookSignals")
+      return handleRecordLineWebhookSignals_(data);
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
     if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
     if (action === "adminUpdateOrderStatus")
       return handleAdminUpdateOrderStatus_(data);
     if (action === "adminCancelOrder") return handleAdminCancelOrder_(data);
+    if (action === "adminAdjustOrderShortage")
+      return handleAdminAdjustOrderShortage_(data);
+    if (action === "adminConfirmCashRefund")
+      return handleAdminConfirmCashRefund_(data);
+    if (action === "adminResolveLineAlert")
+      return handleAdminResolveLineAlert_(data);
     if (action === "adminSendOrderReminder")
       return handleAdminSendOrderReminder_(data);
     if (action === "adminSendMallExpiryReminder")
@@ -129,6 +159,7 @@ function setupQuokkaPreorder() {
   var ss = spreadsheet_();
   ensureSheet_(ss, "Products", PRODUCT_HEADERS_);
   ensureSheet_(ss, "Preorders", ORDER_HEADERS_);
+  ensureSheet_(ss, "LineInboundEvents", LINE_EVENT_HEADERS_);
   ensureSettingsSheet_(ss);
   return "設定完成";
 }
@@ -238,7 +269,9 @@ function handleCreatePreorder_(data) {
     ]);
     orderResult = {
       orderNo: orderNo,
+      createdAt: formatDateTime_(now),
       customerName: cleanText_(data.customerName, 30),
+      items: cleanItems,
       itemsSummary: itemsSummary,
       totalQty: totalQty,
       estimatedTotal: estimatedTotal,
@@ -262,7 +295,7 @@ function handleCreatePreorder_(data) {
 function pushOrderSuccessCard_(lineUserId, order) {
   return pushLineMessage_(
     lineUserId,
-    buildOrderSuccessMessage_(order),
+    buildUnifiedOrderSuccessCard_(order),
     "order success " + order.orderNo,
   );
 }
@@ -297,6 +330,86 @@ function pushLineMessage_(lineUserId, message, logLabel) {
     console.error("LINE push failed: " + safeError_(error));
   }
   return false;
+}
+
+function handleRecordLineWebhookSignals_(data) {
+  var expectedSecret =
+    PropertiesService.getScriptProperties().getProperty(
+      "WEBHOOK_FORWARDING_SECRET",
+    ) || "";
+  if (
+    !expectedSecret ||
+    String(data.forwardingSecret || "") !== expectedSecret
+  )
+    throw new Error("WEBHOOK_FORBIDDEN");
+  var events = Array.isArray(data.events) ? data.events.slice(0, 20) : [];
+  if (!events.length) return json_({ ok: true, recorded: 0 });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("LineInboundEvents");
+    var existing = {};
+    if (sheet.getLastRow() >= 2) {
+      sheet
+        .getRange(2, 1, sheet.getLastRow() - 1, 1)
+        .getDisplayValues()
+        .forEach(function (row) {
+          if (row[0]) existing[row[0]] = true;
+        });
+    }
+    var pendingOrdersByUser = readPendingOrderNosByUser_();
+    var rows = [];
+    events.forEach(function (event) {
+      var eventId = cleanText_(event.webhookEventId, 100);
+      var lineUserId = cleanText_(event.lineUserId, 100);
+      if (!eventId || !lineUserId || existing[eventId]) return;
+      existing[eventId] = true;
+      var candidates = pendingOrdersByUser[lineUserId] || [];
+      rows.push([
+        eventId,
+        lineUserId,
+        formatDateTime_(new Date(Number(event.timestamp) || Date.now())),
+        cleanText_(event.messageType, 30) || "unknown",
+        cleanText_(event.messageId, 100),
+        cleanText_(event.textPreview, 160),
+        candidates.length === 1 ? candidates[0] : "",
+        "待核對",
+        "",
+      ]);
+    });
+    if (rows.length)
+      sheet
+        .getRange(sheet.getLastRow() + 1, 1, rows.length, LINE_EVENT_HEADERS_.length)
+        .setValues(rows);
+    return json_({ ok: true, recorded: rows.length });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function readPendingOrderNosByUser_() {
+  var sheet = spreadsheet_().getSheetByName("Preorders");
+  var result = {};
+  if (!sheet || sheet.getLastRow() < 2) return result;
+  var rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
+    .getDisplayValues();
+  rows.forEach(function (row) {
+    var status = normalizeOrderStatus_(row[15], row[17]);
+    if (
+      [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
+        status,
+      ) < 0
+    )
+      return;
+    var userId = String(row[2] || "").trim();
+    if (!userId) return;
+    if (!result[userId]) result[userId] = [];
+    result[userId].push(String(row[0] || "").trim());
+  });
+  return result;
 }
 
 function buildOrderSuccessMessage_(order) {
@@ -443,6 +556,271 @@ function moneyRow_(label, value, valueColor) {
   };
 }
 
+function buildUnifiedOrderCard_(order, title, message, options) {
+  options = options || {};
+  var body = [
+    {
+      type: "text",
+      text: String(message || ""),
+      wrap: true,
+      weight: "bold",
+      size: "sm",
+      color: options.warning ? "#EF0025" : "#25343B",
+    },
+    { type: "separator", margin: "lg", color: "#C8D8DF" },
+    moneyRow_("訂購人", order.customerName || "—"),
+    moneyRow_("訂單時間", order.createdAt || "—"),
+    {
+      type: "text",
+      text: String(order.itemsSummary || "目前沒有商品明細").slice(0, 1800),
+      wrap: true,
+      size: "sm",
+      margin: "lg",
+      color: "#25343B",
+    },
+    { type: "separator", margin: "lg", color: "#C8D8DF" },
+  ];
+  if (order.totalQty !== undefined)
+    body.push(moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"));
+  if (order.estimatedTotal !== undefined)
+    body.push(
+      moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
+    );
+  if (order.depositTotal !== undefined)
+    body.push(
+      moneyRow_(
+        options.depositLabel || "訂金",
+        "NT$" + formatMoney_(order.depositTotal),
+        "#EF0025",
+      ),
+    );
+  if (order.estimatedBalance !== undefined)
+    body.push(
+      moneyRow_(
+        options.balanceLabel || "後續應付",
+        "NT$" + formatMoney_(order.estimatedBalance),
+      ),
+    );
+  (options.extraRows || []).forEach(function (row) {
+    body.push(moneyRow_(row.label, row.value, row.color));
+  });
+
+  var card = {
+    type: "flex",
+    altText: title + "｜" + order.orderNo,
+    contents: {
+      type: "bubble",
+      styles: {
+        header: { backgroundColor: "#47748E" },
+        footer: { separator: true, separatorColor: "#C8D8DF" },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        contents: [
+          {
+            type: "text",
+            text: title,
+            color: "#FFFFFF",
+            weight: "bold",
+            size: "lg",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: order.orderNo,
+            color: "#F1C84B",
+            weight: "bold",
+            size: "sm",
+            margin: "sm",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        backgroundColor: "#FFFDF7",
+        contents: body,
+      },
+    },
+  };
+  if (options.buttons && options.buttons.length) {
+    card.contents.footer = {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "14px",
+      spacing: "sm",
+      contents: options.buttons.map(function (button, index) {
+        return {
+          type: "button",
+          style: index === 0 ? "primary" : "secondary",
+          color: index === 0 ? "#47748E" : undefined,
+          height: "sm",
+          action: button,
+        };
+      }),
+    };
+  }
+  return card;
+}
+
+function buildUnifiedOrderSuccessCard_(order) {
+  var paymentDue = parseOrderDate_(order.createdAt);
+  if (paymentDue)
+    paymentDue = new Date(
+      paymentDue.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
+    );
+  var transferRequestText =
+    "您好，我想索取匯款資訊\n訂單編號：" +
+    order.orderNo +
+    "\n收件人姓名：" +
+    order.customerName;
+  return buildUnifiedOrderCard_(
+    order,
+    "已收到預購訂單",
+    "請於 " +
+      (paymentDue ? formatDateTime_(paymentDue) : "訂單成立後 24 小時內") +
+      " 前完成匯款並回傳帳號後五碼。",
+    {
+      depositLabel: "本次訂金（50%）",
+      balanceLabel: "回國後剩餘商品款",
+      buttons: [
+        {
+          type: "message",
+          label: "匯款資訊",
+          text: transferRequestText,
+        },
+        {
+          type: "uri",
+          label: "已匯款，前往回報",
+          uri:
+            "https://line.me/R/oaMessage/%40527tnlnn/?" +
+            encodeURIComponent("匯款資訊"),
+        },
+      ],
+    },
+  );
+}
+
+function buildUnifiedPendingCard_(order) {
+  var createdAt = parseOrderDate_(order.createdAt);
+  var dueAt = createdAt
+    ? new Date(
+        createdAt.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
+      )
+    : null;
+  return buildUnifiedOrderCard_(
+    order,
+    "待收訂金",
+    "請於 " +
+      (dueAt ? formatDateTime_(dueAt) : "訂單成立後 24 小時內") +
+      " 前完成匯款並回傳帳號後五碼。",
+    { depositLabel: "應付訂金", balanceLabel: "回國後剩餘商品款" },
+  );
+}
+
+function buildUnifiedDepositReceivedCard_(order) {
+  return buildUnifiedOrderCard_(
+    order,
+    "已收到訂金",
+    "訂金已確認入帳，您的預訂已完成。",
+    { depositLabel: "已收訂金", balanceLabel: "回國後剩餘商品款" },
+  );
+}
+
+function buildUnifiedMallReadyCard_(order, iopenMallUrl) {
+  var mallDeadline = buildMallPaymentDeadline_(order.shippedAt);
+  return buildUnifiedOrderCard_(
+    order,
+    "已開設 iOPEN Mall 賣場",
+    "請於 " +
+      (mallDeadline ? mallDeadline.display : "賣場開設後第七日 24:00") +
+      " 前完成下標及付款。",
+    {
+      balanceLabel: "賣場應付金額",
+      buttons: iopenMallUrl
+        ? [
+            {
+              type: "uri",
+              label: "前往 iOPEN Mall 賣場",
+              uri: iopenMallUrl,
+            },
+          ]
+        : [],
+    },
+  );
+}
+
+function buildUnifiedReminderCard_(order, message, title, iopenMallUrl) {
+  return buildUnifiedOrderCard_(order, title, message, {
+    warning: true,
+    depositLabel: "應付訂金",
+    balanceLabel:
+      title === "iOPEN Mall 付款提醒" ? "賣場應付金額" : "後續應付",
+    buttons:
+      title === "iOPEN Mall 付款提醒" && iopenMallUrl
+        ? [
+            {
+              type: "uri",
+              label: "前往 iOPEN Mall 賣場",
+              uri: iopenMallUrl,
+            },
+          ]
+        : [],
+  });
+}
+
+function buildUnifiedCancellationCard_(order) {
+  return buildUnifiedOrderCard_(
+    order,
+    "預購訂單已取消",
+    String(order.reason || "訂單已由管理員取消。"),
+    { warning: true, depositLabel: "原訂金", balanceLabel: "原後續應付" },
+  );
+}
+
+function buildUnifiedShortageCard_(order) {
+  var cancelledText = order.cancelledItems
+    .map(function (item) {
+      return (
+        "・" +
+        item.name +
+        (item.variant ? "｜" + item.variant : "") +
+        " × " +
+        item.qty +
+        "（扣除 NT$" +
+        formatMoney_(item.subtotalTwd) +
+        "）"
+      );
+    })
+    .join("\n");
+  var settlement = order.allItemsCancelled
+    ? "全品項缺貨，訂單已取消並列為待退款。"
+    : order.cashRefundDue > 0
+      ? "出貨時將退還現金 NT$" + formatMoney_(order.cashRefundDue) + "。"
+      : "後續應付 NT$" + formatMoney_(order.adjustedBalance) + "。";
+  return buildUnifiedOrderCard_(
+    order,
+    "訂單缺貨調整",
+    "以下缺貨品項已取消：\n" + cancelledText + "\n\n" + settlement,
+    {
+      depositLabel: "已付訂金",
+      balanceLabel: "調整後後續應付",
+      extraRows: [
+        { label: "原訂單金額", value: "NT$" + formatMoney_(order.originalTotal) },
+        { label: "本次扣除", value: "NT$" + formatMoney_(order.cancelledAmount) },
+        {
+          label: "調整後金額",
+          value: "NT$" + formatMoney_(order.adjustedTotal),
+          color: "#EF0025",
+        },
+      ],
+    },
+  );
+}
+
 function formatMoney_(value) {
   return Math.round(number_(value))
     .toString()
@@ -470,10 +848,27 @@ function handleConfirmPreorderPayment_(data) {
       if (String(row[0]).trim() !== orderNo) continue;
       if (String(row[2]).trim() !== profile.sub)
         throw new Error("ORDER_FORBIDDEN");
+      var currentStatus = normalizeOrderStatus_(row[15], row[17]);
+      if (
+        [
+          ORDER_STATUS_PENDING_,
+          ORDER_STATUS_PAYMENT_REPORTED_,
+        ].indexOf(currentStatus) < 0
+      )
+        throw new Error("INVALID_ORDER_STATUS");
       sheet.getRange(index + 2, 13).setValue("銀行轉帳");
       sheet.getRange(index + 2, 14).setValue(transferLast5);
-      sheet.getRange(index + 2, 16).setValue("待確認訂金");
-      return json_({ ok: true, orderNo: orderNo, status: "待確認訂金" });
+      sheet
+        .getRange(index + 2, 16)
+        .setValue(ORDER_STATUS_PAYMENT_REPORTED_);
+      var paymentReportedAt = formatDateTime_(new Date());
+      sheet.getRange(index + 2, 30).setValue(paymentReportedAt);
+      return json_({
+        ok: true,
+        orderNo: orderNo,
+        status: ORDER_STATUS_PAYMENT_REPORTED_,
+        paymentReportedAt: paymentReportedAt,
+      });
     }
     throw new Error("ORDER_NOT_FOUND");
   } finally {
@@ -507,6 +902,10 @@ function handleReadMyPreorders_(data) {
       estimatedTotal: number_(row[9]),
       depositTotal: number_(row[10]),
       estimatedBalance: number_(row[11]),
+      originalEstimatedTotal: number_(row[23]) || number_(row[9]),
+      shortageAdjustedAt: row[25],
+      cashRefundDue: number_(row[26]),
+      cashRefundedAt: row[27],
       status: status,
       shippedAt: row[18],
       iopenMallUrl:
@@ -537,6 +936,7 @@ function readAdminOrders_() {
     .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
     .getDisplayValues();
   var now = new Date();
+  var lineAlertsByUser = readUnreviewedLineAlertsByUser_();
   return rows
     .filter(function (row) {
       return String(row[0] || "").trim();
@@ -560,6 +960,21 @@ function readAdminOrders_() {
         status === ORDER_STATUS_SHIPPED_
           ? buildMallPaymentDeadline_(row[18])
           : null;
+      var lineAlerts =
+        [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
+          status,
+        ) >= 0
+          ? (lineAlertsByUser[String(row[2] || "").trim()] || []).filter(
+              function (alert) {
+                return (
+                  (!alert.matchedOrderNo || alert.matchedOrderNo === row[0]) &&
+                  (!createdAt ||
+                    !alert.receivedDate ||
+                    alert.receivedDate >= createdAt)
+                );
+              },
+            )
+          : [];
       return {
         orderNo: row[0],
         createdAt: row[1],
@@ -586,10 +1001,37 @@ function readAdminOrders_() {
         reminderSentAt: row[19],
         cancelledAt: row[20],
         mallReminderSentAt: row[21],
+        originalItems: parseJsonArray_(row[22]),
+        originalEstimatedTotal: number_(row[23]) || number_(row[9]),
+        shortageAdjustments: parseJsonArray_(row[24]),
+        shortageAdjustedAt: row[25],
+        cashRefundDue: number_(row[26]),
+        cashRefundedAt: row[27],
+        shortageNotificationSentAt: row[28],
+        paymentReportedAt: row[29],
+        paymentDueText: createdAt
+          ? formatDateTime_(
+              new Date(
+                createdAt.getTime() +
+                  ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
+              ),
+            )
+          : "",
+        paymentOverdue:
+          status === ORDER_STATUS_PENDING_ &&
+          ageHours >= ORDER_PAYMENT_DEADLINE_HOURS_,
+        lineAlertCount: lineAlerts.length,
+        latestLineAlert: lineAlerts.length
+          ? {
+              receivedAt: lineAlerts[lineAlerts.length - 1].receivedAt,
+              messageType: lineAlerts[lineAlerts.length - 1].messageType,
+              textPreview: lineAlerts[lineAlerts.length - 1].textPreview,
+            }
+          : null,
         reminderDue:
           status === ORDER_STATUS_PENDING_ &&
           ageHours >= ORDER_REMINDER_HOURS_ &&
-          ageHours < ORDER_AUTO_CANCEL_HOURS_ &&
+          ageHours < ORDER_PAYMENT_DEADLINE_HOURS_ &&
           !String(row[19] || "").trim(),
         reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : "",
         mallReminderDue:
@@ -597,12 +1039,81 @@ function readAdminOrders_() {
           mallDeadline.reminderDue &&
           !String(row[21] || "").trim(),
         mallReminderMessage: mallDeadline
-          ? buildMallExpiryReminderText_()
+          ? buildMallExpiryReminderText_(mallDeadline.display)
           : "",
+        mallPaymentDueText: mallDeadline ? mallDeadline.display : "",
+        mallPaymentExpired: mallDeadline ? mallDeadline.expired : false,
       };
     })
     .reverse()
     .slice(0, 300);
+}
+
+function readUnreviewedLineAlertsByUser_() {
+  var sheet = spreadsheet_().getSheetByName("LineInboundEvents");
+  var result = {};
+  if (!sheet || sheet.getLastRow() < 2) return result;
+  var rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, LINE_EVENT_HEADERS_.length)
+    .getDisplayValues();
+  rows.forEach(function (row) {
+    if (String(row[7] || "").trim() !== "待核對") return;
+    var userId = String(row[1] || "").trim();
+    if (!userId) return;
+    if (!result[userId]) result[userId] = [];
+    result[userId].push({
+      receivedAt: row[2],
+      receivedDate: parseOrderDate_(row[2]),
+      messageType: row[3],
+      textPreview: row[5],
+      matchedOrderNo: row[6],
+    });
+  });
+  return result;
+}
+
+function handleAdminResolveLineAlert_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  if (!orderNo) throw new Error("ORDER_NOT_FOUND");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var orderSheet = spreadsheet_().getSheetByName("Preorders");
+    var orderRow = findOrderRow_(orderSheet, orderNo);
+    if (!orderRow) throw new Error("ORDER_NOT_FOUND");
+    var order = orderSheet
+      .getRange(orderRow, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
+    var userId = String(order[2] || "").trim();
+    var createdAt = parseOrderDate_(order[1]);
+    var eventSheet = spreadsheet_().getSheetByName("LineInboundEvents");
+    var reviewedAt = formatDateTime_(new Date());
+    var resolved = 0;
+    if (eventSheet && eventSheet.getLastRow() >= 2) {
+      var rows = eventSheet
+        .getRange(2, 1, eventSheet.getLastRow() - 1, LINE_EVENT_HEADERS_.length)
+        .getDisplayValues();
+      rows.forEach(function (row, index) {
+        var receivedAt = parseOrderDate_(row[2]);
+        if (
+          row[1] === userId &&
+          row[7] === "待核對" &&
+          (!row[6] || row[6] === orderNo) &&
+          (!createdAt || !receivedAt || receivedAt >= createdAt)
+        ) {
+          eventSheet
+            .getRange(index + 2, 7, 1, 3)
+            .setValues([[orderNo, "已核對", reviewedAt]]);
+          resolved += 1;
+        }
+      });
+    }
+    return json_({ ok: true, orderNo: orderNo, resolved: resolved });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function handleAdminUpdateOrderStatus_(data) {
@@ -613,6 +1124,7 @@ function handleAdminUpdateOrderStatus_(data) {
     status = ORDER_STATUS_SHIPPED_;
   var allowed = [
     ORDER_STATUS_PENDING_,
+    ORDER_STATUS_PAYMENT_REPORTED_,
     ORDER_STATUS_DEPOSIT_RECEIVED_,
     ORDER_STATUS_SHIPPED_,
     ORDER_STATUS_COMPLETED_,
@@ -664,8 +1176,13 @@ function handleAdminUpdateOrderStatus_(data) {
       notificationTarget = {
         lineUserId: row[2],
         orderNo: row[0],
+        createdAt: row[1],
         customerName: row[4],
+        itemsSummary: row[7],
+        totalQty: number_(row[8]),
+        estimatedTotal: number_(row[9]),
         depositTotal: number_(row[10]),
+        estimatedBalance: number_(row[11]),
         shippedAt: shippedAt,
       };
       break;
@@ -676,19 +1193,22 @@ function handleAdminUpdateOrderStatus_(data) {
   }
 
   var shouldNotify =
-    previousStatus !== status && status !== ORDER_STATUS_COMPLETED_;
+    previousStatus !== status &&
+    [ORDER_STATUS_COMPLETED_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
+      status,
+    ) < 0;
   var notificationSent = false;
   if (shouldNotify && status === ORDER_STATUS_PENDING_) {
     notificationSent = pushLineMessage_(
       notificationTarget.lineUserId,
-      buildPendingStatusMessage_(notificationTarget),
+      buildUnifiedPendingCard_(notificationTarget),
       "pending deposit " + orderNo,
     );
   }
   if (shouldNotify && status === ORDER_STATUS_DEPOSIT_RECEIVED_) {
     notificationSent = pushLineMessage_(
       notificationTarget.lineUserId,
-      buildDepositReceivedMessage_(notificationTarget),
+      buildUnifiedDepositReceivedCard_(notificationTarget),
       "deposit received " + orderNo,
     );
   }
@@ -697,7 +1217,7 @@ function handleAdminUpdateOrderStatus_(data) {
       readSettings_().iopenMallUrl || DEFAULT_SETTINGS_.iopenMallUrl;
     notificationSent = pushLineMessage_(
       notificationTarget.lineUserId,
-      buildIopenMallReadyMessage_(notificationTarget, iopenMallUrl),
+      buildUnifiedMallReadyCard_(notificationTarget, iopenMallUrl),
       "iopen mall ready " + orderNo,
     );
   }
@@ -850,9 +1370,304 @@ function handleAdminCancelOrder_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var result = cancelOrder_(
     String(data.orderNo || "").trim(),
-    "此訂單已由管理員取消。",
+    cleanText_(data.reason, 200) || "此訂單已由管理員取消。",
   );
   return json_({ ok: true, order: result });
+}
+
+function handleAdminAdjustOrderShortage_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  var requested = Array.isArray(data.cancellations) ? data.cancellations : [];
+  if (!orderNo || !requested.length) throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
+
+  var lock = LockService.getScriptLock();
+  var result;
+  var notificationTarget;
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var rowNumber = findOrderRow_(sheet, orderNo);
+    if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
+    var row = sheet
+      .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
+    var currentStatus = normalizeOrderStatus_(row[15], row[17]);
+    if (
+      [ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_SHIPPED_].indexOf(
+        currentStatus,
+      ) < 0
+    )
+      throw new Error("SHORTAGE_REQUIRES_DEPOSIT");
+
+    var currentItems = parseJsonArray_(row[6]);
+    if (!currentItems.length) throw new Error("NO_ITEMS_TO_ADJUST");
+    var cancelByIndex = {};
+    requested.forEach(function (entry) {
+      var itemIndex = Number(entry && entry.index);
+      var qty = Number(entry && entry.qty);
+      if (
+        !Number.isInteger(itemIndex) ||
+        itemIndex < 0 ||
+        itemIndex >= currentItems.length ||
+        !Number.isInteger(qty) ||
+        qty < 1
+      )
+        throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
+      if (cancelByIndex[itemIndex])
+        throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
+      cancelByIndex[itemIndex] = qty;
+    });
+
+    var cancelledItems = [];
+    var remainingItems = [];
+    var cancelledAmount = 0;
+    currentItems.forEach(function (item, itemIndex) {
+      var currentQty = number_(item.qty);
+      var cancelQty = cancelByIndex[itemIndex] || 0;
+      if (cancelQty > currentQty)
+        throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
+      var unitPrice = number_(item.unitPriceTwd);
+      if (!unitPrice && currentQty)
+        unitPrice = Math.round(number_(item.subtotalTwd) / currentQty);
+      if (cancelQty) {
+        cancelledItems.push({
+          productId: String(item.productId || ""),
+          name: String(item.name || ""),
+          variant: String(item.variant || ""),
+          qty: cancelQty,
+          unitPriceTwd: unitPrice,
+          subtotalTwd: unitPrice * cancelQty,
+        });
+        cancelledAmount += unitPrice * cancelQty;
+      }
+      var remainingQty = currentQty - cancelQty;
+      if (remainingQty > 0) {
+        remainingItems.push({
+          productId: String(item.productId || ""),
+          name: String(item.name || ""),
+          variant: String(item.variant || ""),
+          qty: remainingQty,
+          unitPriceTwd: unitPrice,
+          subtotalTwd: unitPrice * remainingQty,
+        });
+      }
+    });
+    if (!cancelledItems.length || cancelledAmount < 1)
+      throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
+
+    var originalItemsJson = String(row[22] || "").trim() || row[6] || "[]";
+    var originalTotal = number_(row[23]) || number_(row[9]);
+    var previousTotal = number_(row[9]);
+    var adjustedTotal = remainingItems.reduce(function (sum, item) {
+      return sum + number_(item.subtotalTwd);
+    }, 0);
+    var depositTotal = number_(row[10]);
+    var adjustedBalance = Math.max(adjustedTotal - depositTotal, 0);
+    var cashRefundDue = Math.max(depositTotal - adjustedTotal, 0);
+    var adjustedAt = formatDateTime_(new Date());
+    var adjustments = parseJsonArray_(row[24]);
+    adjustments.push({
+      adjustedAt: adjustedAt,
+      previousTotal: previousTotal,
+      cancelledAmount: cancelledAmount,
+      adjustedTotal: adjustedTotal,
+      cancelledItems: cancelledItems,
+    });
+    var totalQty = remainingItems.reduce(function (sum, item) {
+      return sum + number_(item.qty);
+    }, 0);
+    var itemsSummary = remainingItems
+      .map(function (item) {
+        return (
+          item.name +
+          (item.variant ? "｜" + item.variant : "") +
+          " × " +
+          item.qty
+        );
+      })
+      .join("\n");
+    var allItemsCancelled = remainingItems.length === 0;
+    var nextStatus = allItemsCancelled
+      ? ORDER_STATUS_CANCELLED_
+      : currentStatus;
+    var cancelledAt = allItemsCancelled ? adjustedAt : row[20];
+    var shippingStatus = allItemsCancelled ? "未開設賣場" : row[17];
+    var shippedAt = allItemsCancelled ? "" : row[18];
+
+    sheet
+      .getRange(rowNumber, 7, 1, 6)
+      .setValues([
+        [
+          JSON.stringify(remainingItems),
+          itemsSummary,
+          totalQty,
+          adjustedTotal,
+          depositTotal,
+          adjustedBalance,
+        ],
+      ]);
+    sheet.getRange(rowNumber, 16).setValue(nextStatus);
+    sheet
+      .getRange(rowNumber, 18, 1, 2)
+      .setValues([[shippingStatus, shippedAt]]);
+    sheet.getRange(rowNumber, 21).setValue(cancelledAt);
+    sheet
+      .getRange(rowNumber, 23, 1, 7)
+      .setValues([
+        [
+          originalItemsJson,
+          originalTotal,
+          JSON.stringify(adjustments),
+          adjustedAt,
+          cashRefundDue,
+          "",
+          "",
+        ],
+      ]);
+
+    result = {
+      orderNo: orderNo,
+      items: remainingItems,
+      itemsSummary: itemsSummary,
+      totalQty: totalQty,
+      estimatedTotal: adjustedTotal,
+      originalEstimatedTotal: originalTotal,
+      depositTotal: depositTotal,
+      estimatedBalance: adjustedBalance,
+      status: nextStatus,
+      shippingStatus: shippingStatus,
+      shippedAt: shippedAt,
+      cancelledAt: cancelledAt,
+      shortageAdjustments: adjustments,
+      shortageAdjustedAt: adjustedAt,
+      cashRefundDue: cashRefundDue,
+      cashRefundedAt: "",
+    };
+    notificationTarget = {
+      lineUserId: row[2],
+      orderNo: orderNo,
+      createdAt: row[1],
+      customerName: row[4],
+      itemsSummary: itemsSummary || "品項已全數取消",
+      totalQty: totalQty,
+      estimatedTotal: adjustedTotal,
+      originalTotal: originalTotal,
+      previousTotal: previousTotal,
+      cancelledAmount: cancelledAmount,
+      adjustedTotal: adjustedTotal,
+      depositTotal: depositTotal,
+      adjustedBalance: adjustedBalance,
+      estimatedBalance: adjustedBalance,
+      cashRefundDue: cashRefundDue,
+      allItemsCancelled: allItemsCancelled,
+      cancelledItems: cancelledItems,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+
+  var notificationSent = pushLineMessage_(
+    notificationTarget.lineUserId,
+    buildUnifiedShortageCard_(notificationTarget),
+    "shortage adjustment " + orderNo,
+  );
+  var notificationSentAt = notificationSent ? formatDateTime_(new Date()) : "";
+  if (notificationSentAt) {
+    var notificationSheet = spreadsheet_().getSheetByName("Preorders");
+    var notificationRow = findOrderRow_(notificationSheet, orderNo);
+    if (notificationRow)
+      notificationSheet.getRange(notificationRow, 29).setValue(notificationSentAt);
+  }
+  result.notificationAttempted = true;
+  result.notificationSent = notificationSent;
+  result.shortageNotificationSentAt = notificationSentAt;
+  return json_({ ok: true, order: result });
+}
+
+function handleAdminConfirmCashRefund_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  if (!orderNo) throw new Error("ORDER_NOT_FOUND");
+  var lock = LockService.getScriptLock();
+  var result;
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var rowNumber = findOrderRow_(sheet, orderNo);
+    if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
+    var row = sheet
+      .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
+    var cashRefundDue = number_(row[26]);
+    if (cashRefundDue < 1) throw new Error("NO_CASH_REFUND_DUE");
+    var cashRefundedAt = String(row[27] || "").trim();
+    if (!cashRefundedAt) {
+      cashRefundedAt = formatDateTime_(new Date());
+      sheet.getRange(rowNumber, 28).setValue(cashRefundedAt);
+    }
+    result = {
+      orderNo: orderNo,
+      cashRefundDue: cashRefundDue,
+      cashRefundedAt: cashRefundedAt,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+  return json_({ ok: true, order: result });
+}
+
+function buildShortageAdjustmentMessage_(order) {
+  var cancelledText = order.cancelledItems
+    .map(function (item) {
+      return (
+        "・" +
+        item.name +
+        (item.variant ? "｜" + item.variant : "") +
+        " × " +
+        item.qty +
+        "（扣除 NT$" +
+        formatMoney_(item.subtotalTwd) +
+        "）"
+      );
+    })
+    .join("\n");
+  var paymentText = order.allItemsCancelled
+    ? "訂單已因全品項缺貨取消，已付訂金 NT$" +
+      formatMoney_(order.depositTotal) +
+      " 列為待退款。"
+    : order.cashRefundDue > 0
+      ? "已付訂金 NT$" +
+        formatMoney_(order.depositTotal) +
+        "，出貨時將退還現金 NT$" +
+        formatMoney_(order.cashRefundDue) +
+        "。"
+      : "已付訂金 NT$" +
+        formatMoney_(order.depositTotal) +
+        "，後續應付 NT$" +
+        formatMoney_(order.adjustedBalance) +
+        "。";
+  return {
+    type: "text",
+    text:
+      "訂單缺貨調整｜" +
+      order.orderNo +
+      "\n\n" +
+      (order.customerName || "訂購人") +
+      "您好，以下缺貨品項已取消：\n" +
+      cancelledText +
+      "\n\n原訂單金額 NT$" +
+      formatMoney_(order.originalTotal) +
+      "\n本次扣除 NT$" +
+      formatMoney_(order.cancelledAmount) +
+      "\n調整後金額 NT$" +
+      formatMoney_(order.adjustedTotal) +
+      "\n" +
+      paymentText +
+      "\n\n如有疑問，請直接在 LINE 與小幫手聯絡。",
+  };
 }
 
 function handleAdminSendOrderReminder_(data) {
@@ -880,17 +1695,32 @@ function handleAdminSendOrderReminder_(data) {
     if (
       !createdAt ||
       ageMilliseconds < ORDER_REMINDER_HOURS_ * 3600000 ||
-      ageMilliseconds >= ORDER_AUTO_CANCEL_HOURS_ * 3600000
+      ageMilliseconds >= ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000
     )
       throw new Error("REMINDER_NOT_DUE");
-    target = { lineUserId: row[2], orderNo: row[0] };
+    target = {
+      lineUserId: row[2],
+      orderNo: row[0],
+      createdAt: row[1],
+      customerName: row[4],
+      itemsSummary: row[7],
+      totalQty: number_(row[8]),
+      estimatedTotal: number_(row[9]),
+      depositTotal: number_(row[10]),
+      estimatedBalance: number_(row[11]),
+    };
   } finally {
     lock.releaseLock();
   }
   if (
     !pushLineMessage_(
       target.lineUserId,
-      { type: "text", text: message },
+      buildUnifiedReminderCard_(
+        target,
+        message,
+        "訂金付款提醒",
+        "",
+      ),
       "reminder " + target.orderNo,
     )
   )
@@ -934,14 +1764,29 @@ function handleAdminSendMallExpiryReminder_(data) {
       String(row[21] || "").trim()
     )
       throw new Error("REMINDER_NOT_DUE");
-    target = { lineUserId: row[2], orderNo: row[0] };
+    target = {
+      lineUserId: row[2],
+      orderNo: row[0],
+      createdAt: row[1],
+      customerName: row[4],
+      itemsSummary: row[7],
+      totalQty: number_(row[8]),
+      estimatedTotal: number_(row[9]),
+      depositTotal: number_(row[10]),
+      estimatedBalance: number_(row[11]),
+    };
   } finally {
     lock.releaseLock();
   }
   if (
     !pushLineMessage_(
       target.lineUserId,
-      { type: "text", text: message },
+      buildUnifiedReminderCard_(
+        target,
+        message,
+        "iOPEN Mall 付款提醒",
+        readSettings_().iopenMallUrl || DEFAULT_SETTINGS_.iopenMallUrl,
+      ),
       "mall expiry reminder " + target.orderNo,
     )
   )
@@ -980,6 +1825,7 @@ function processExpiredPreorders() {
     .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
     .getDisplayValues();
   var now = new Date();
+  var lineAlertsByUser = readUnreviewedLineAlertsByUser_();
   var expiredOrderNos = [];
   rows.forEach(function (row) {
     var createdAt = parseOrderDate_(row[1]);
@@ -988,6 +1834,14 @@ function processExpiredPreorders() {
       normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_
     )
       return;
+    var alerts = lineAlertsByUser[String(row[2] || "").trim()] || [];
+    var hasPendingAlert = alerts.some(function (alert) {
+      return (
+        (!alert.matchedOrderNo || alert.matchedOrderNo === row[0]) &&
+        (!createdAt || !alert.receivedDate || alert.receivedDate >= createdAt)
+      );
+    });
+    if (hasPendingAlert) return;
     if (
       now.getTime() - createdAt.getTime() >=
       ORDER_AUTO_CANCEL_HOURS_ * 3600000
@@ -995,7 +1849,8 @@ function processExpiredPreorders() {
       expiredOrderNos.push(String(row[0] || "").trim());
   });
   expiredOrderNos.forEach(function (orderNo) {
-    if (orderNo) cancelOrder_(orderNo, "超過 25 小時未確認收到訂金");
+    if (orderNo)
+      cancelOrder_(orderNo, "超過訂金付款期限仍未確認收到訂金。");
   });
   return expiredOrderNos.length;
 }
@@ -1024,7 +1879,7 @@ function cancelOrder_(orderNo, reason) {
       };
     }
     if (
-      String(reason || "").indexOf("25 小時") >= 0 &&
+      String(reason || "").indexOf("訂金付款期限") >= 0 &&
       currentStatus !== ORDER_STATUS_PENDING_
     ) {
       return {
@@ -1042,9 +1897,13 @@ function cancelOrder_(orderNo, reason) {
     target = {
       lineUserId: row[2],
       orderNo: row[0],
+      createdAt: row[1],
       customerName: row[4],
       itemsSummary: row[7],
+      totalQty: number_(row[8]),
+      estimatedTotal: number_(row[9]),
       depositTotal: number_(row[10]),
+      estimatedBalance: number_(row[11]),
       reason: reason,
     };
   } finally {
@@ -1052,7 +1911,7 @@ function cancelOrder_(orderNo, reason) {
   }
   var notificationSent = pushLineMessage_(
     target.lineUserId,
-    buildOrderCancellationMessage_(target),
+    buildUnifiedCancellationCard_(target),
     "order cancellation " + target.orderNo,
   );
   return {
@@ -1139,16 +1998,19 @@ function buildOrderCancellationMessage_(order) {
 
 function buildOrderReminderText_(expiresAt) {
   return (
-    "溫馨提醒：此預訂訂單將於12小時後逾期，\n" +
-    "記得匯款訂金金額完成訂購喔～^_^\n" +
-    "若您已匯款成功，請回傳帳號後五碼，進入下一階段手續喔"
+    "溫馨提醒：\n" +
+    "此訂單的訂金付款期限為 " +
+    formatDateTime_(expiresAt) +
+    "。\n請在期限前完成匯款並回傳帳號後五碼。"
   );
 }
 
-function buildMallExpiryReminderText_() {
+function buildMallExpiryReminderText_(deadlineText) {
   return (
     "溫馨提醒：\n" +
-    "此訂單將24小時後逾期，請務必在期限內至賣場下標。\n" +
+    "此訂單的 iOPEN Mall 付款期限為 " +
+    String(deadlineText || "賣場開設後第七日 24:00") +
+    "，請務必在期限內至賣場下標。\n" +
     "訂單取消後訂金不退還喔～^_^"
   );
 }
@@ -1167,6 +2029,8 @@ function normalizeOrderStatus_(status, shippingStatus) {
     return ORDER_STATUS_SHIPPED_;
   if (value === ORDER_STATUS_DEPOSIT_RECEIVED_)
     return ORDER_STATUS_DEPOSIT_RECEIVED_;
+  if (value === ORDER_STATUS_PAYMENT_REPORTED_)
+    return ORDER_STATUS_PAYMENT_REPORTED_;
   return ORDER_STATUS_PENDING_;
 }
 
@@ -1217,6 +2081,15 @@ function findOrderRow_(sheet, orderNo) {
   return 0;
 }
 
+function parseJsonArray_(value) {
+  try {
+    var parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
 function readPurchaseSummary_() {
   var sheet = spreadsheet_().getSheetByName("Preorders");
   var lastRow = sheet ? sheet.getLastRow() : 0;
@@ -1229,7 +2102,15 @@ function readPurchaseSummary_() {
   var grouped = {};
   rows.forEach(function (row) {
     if (!String(row[0] || "").trim()) return;
-    if (String(row[15] || "").trim() === "已取消") return;
+    var status = normalizeOrderStatus_(row[15], row[17]);
+    if (
+      [
+        ORDER_STATUS_DEPOSIT_RECEIVED_,
+        ORDER_STATUS_SHIPPED_,
+        ORDER_STATUS_COMPLETED_,
+      ].indexOf(status) < 0
+    )
+      return;
     orderCount += 1;
     totalQty += number_(row[8]);
     try {

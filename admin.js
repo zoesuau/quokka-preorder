@@ -1,5 +1,6 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
 const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
+const PAYMENT_REPORTED_STATUS = "待確認訂金";
 const ORDER_COMPLETED_STATUS = "訂單已完成";
 const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
@@ -159,7 +160,7 @@ function renderPurchaseSummary() {
   document.getElementById("orderedItemCount").textContent = formatNumber(summary.totalQty);
   document.getElementById("purchaseItemList").innerHTML = summary.items?.length
     ? summary.items.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}</span><b>× ${formatNumber(item.qty)}</b></div>`).join("")
-    : `<p>目前還沒有訂單。</p>`;
+    : `<p>目前還沒有已收訂金的訂單。</p>`;
 }
 
 function renderAdminOrders() {
@@ -183,18 +184,21 @@ function normalizeAdminOrderStatus(status) {
 
 function renderAdminOrderCard(order) {
   const normalizedStatus = normalizeAdminOrderStatus(order.status);
-  const status = ["待收訂金", "已收到訂金", IOPEN_MALL_READY_STATUS, ORDER_COMPLETED_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
-  const statusClass = { "待收訂金": "pending", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", [ORDER_COMPLETED_STATUS]: "completed", "已取消": "cancelled" }[status];
+  const status = ["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金", IOPEN_MALL_READY_STATUS, ORDER_COMPLETED_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
+  const statusClass = { "待收訂金": "pending", [PAYMENT_REPORTED_STATUS]: "payment-reported", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", [ORDER_COMPLETED_STATUS]: "completed", "已取消": "cancelled" }[status];
+  const displayStatus = order.mallPaymentExpired ? "賣場付款已逾期／待確認" : status;
   const items = Array.isArray(order.items) ? order.items : [];
   const shortageHistory = Array.isArray(order.shortageAdjustments) ? order.shortageAdjustments : [];
   const canAdjustShortage = ["已收到訂金", IOPEN_MALL_READY_STATUS].includes(status) && items.length > 0;
-  const primaryAmount = status === "待收訂金"
+  const primaryAmount = ["待收訂金", PAYMENT_REPORTED_STATUS].includes(status)
     ? { label: "訂金金額", value: order.depositTotal }
     : [IOPEN_MALL_READY_STATUS, "已收到訂金"].includes(status)
       ? { label: "剩餘金額", value: order.estimatedBalance }
       : { label: "訂單金額", value: order.estimatedTotal };
   const statusDetailRows = status === "待收訂金"
-    ? `<div><dt>訂單金額</dt><dd class="order-accent">NT $${formatNumber(order.estimatedTotal)}</dd></div><div><dt>剩餘金額</dt><dd>NT $${formatNumber(order.estimatedBalance)}</dd></div>`
+    ? `<div><dt>付款期限</dt><dd class="${order.paymentOverdue ? "refund-pending" : ""}">${escapeHtml(order.paymentDueText || "—")}</dd></div><div><dt>訂單金額</dt><dd class="order-accent">NT $${formatNumber(order.estimatedTotal)}</dd></div>`
+    : status === PAYMENT_REPORTED_STATUS
+      ? `<div><dt>匯款後五碼</dt><dd class="order-accent">${escapeHtml(order.transferLast5 || "未填寫")}</dd></div><div><dt>回報時間</dt><dd>${escapeHtml(order.paymentReportedAt || "—")}</dd></div>`
     : status === "已收到訂金"
       ? `<div><dt>訂單金額</dt><dd class="order-accent">NT $${formatNumber(order.estimatedTotal)}</dd></div><div><dt>訂金金額</dt><dd>NT $${formatNumber(order.depositTotal)}</dd></div>`
       : status === IOPEN_MALL_READY_STATUS
@@ -202,8 +206,14 @@ function renderAdminOrderCard(order) {
         : status === ORDER_COMPLETED_STATUS
           ? `<div><dt>訂金金額</dt><dd>NT $${formatNumber(order.depositTotal)}</dd></div><div><dt>訂單金額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>`
           : `<div><dt>訂單金額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>${order.cancelledAt ? `<div><dt>取消時間</dt><dd>${escapeHtml(order.cancelledAt)}</dd></div>` : ""}`;
-  return `<article class="admin-order-card ${statusClass}" data-order-card="${escapeAttr(order.orderNo)}">
-    <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.lineDisplayName || order.customerName || "未命名")}</h3></div><b>${escapeHtml(order.orderNo)}</b></header>
+  const lineAlert = Number(order.lineAlertCount || 0) > 0
+    ? `<section class="line-alert"><strong>LINE 有新訊息待核對</strong><span>${formatNumber(order.lineAlertCount)} 則・${escapeHtml(formatLineMessageType(order.latestLineAlert?.messageType))}・${escapeHtml(order.latestLineAlert?.receivedAt || "")}</span>${order.latestLineAlert?.textPreview ? `<p>${escapeHtml(order.latestLineAlert.textPreview)}</p>` : ""}<small>核對前系統不會自動取消這筆訂單。</small><button type="button" data-resolve-line-order="${escapeAttr(order.orderNo)}">已查看，解除保護</button></section>`
+    : "";
+  const mallExpiry = order.mallPaymentExpired
+    ? `<section class="mall-expiry-alert"><strong>賣場付款已逾期／待確認</strong><span>付款期限：${escapeHtml(order.mallPaymentDueText || "—")}</span><p>請先至 iOPEN Mall 確認並關閉賣場，再由訂單狀態選擇「取消訂單」發送結案卡片。</p></section>`
+    : "";
+  return `<article class="admin-order-card ${statusClass} ${order.mallPaymentExpired ? "mall-overdue" : ""}" data-order-card="${escapeAttr(order.orderNo)}">
+    <header><div><span>${escapeHtml(displayStatus)}</span><h3>${escapeHtml(order.lineDisplayName || order.customerName || "未命名")}</h3></div><b>${escapeHtml(order.orderNo)}</b></header>
     <div class="packing-items">${items.map((item) => `<div><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<b>× ${formatNumber(item.qty)}</b></div>`).join("") || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
     <div class="order-summary-box">
       <div class="order-primary-amount"><span>${primaryAmount.label}</span><strong>NT $${formatNumber(primaryAmount.value)}</strong></div>
@@ -213,9 +223,11 @@ function renderAdminOrderCard(order) {
         ${statusDetailRows}
       </dl>
       <div class="order-status-actions">
-        <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
+        <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="${PAYMENT_REPORTED_STATUS}" ${status === PAYMENT_REPORTED_STATUS ? "selected" : ""} disabled>${PAYMENT_REPORTED_STATUS}（顧客回報）</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
         ${canAdjustShortage ? `<button class="shortage-action" type="button" data-shortage-order="${escapeAttr(order.orderNo)}">取消缺貨品項</button>` : ""}
       </div>
+      ${lineAlert}
+      ${mallExpiry}
       ${shortageHistory.length ? renderShortageHistory(order, shortageHistory) : ""}
       ${order.reminderDue ? `<div class="order-reminder"><label>12小時未收到訂金通知<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
       ${order.mallReminderDue ? `<div class="order-reminder"><label>七天賣場取消通知<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">七天賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
@@ -224,8 +236,22 @@ function renderAdminOrderCard(order) {
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-reminder-order], [data-mall-reminder-order], [data-shortage-order], [data-refund-order]");
+  const button = event.target.closest("[data-reminder-order], [data-mall-reminder-order], [data-shortage-order], [data-refund-order], [data-resolve-line-order]");
   if (!button) return;
+  if (button.dataset.resolveLineOrder) {
+    if (!window.confirm("確定已核對這位顧客的 LINE 訊息？解除保護後，超過內部寬限時間且仍未確認訂金的訂單，會在下一次排程自動取消。")) return;
+    button.disabled = true;
+    try {
+      const result = await adminPost({ action: "adminResolveLineAlert", orderNo: button.dataset.resolveLineOrder });
+      if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
+      await loadAdminProducts();
+      showToast("LINE 訊息已標記為已核對");
+    } catch (error) {
+      button.disabled = false;
+      showToast("目前無法解除訊息保護");
+    }
+    return;
+  }
   if (button.dataset.shortageOrder) {
     openShortageDialog(button.dataset.shortageOrder);
     return;
@@ -391,7 +417,8 @@ function confirmOrderStatusChange(orderNo, previousStatus, nextStatus) {
 async function handleOrderStatusChange(event) {
   const select = event.target.closest("[data-status-order]");
   if (!select) return;
-  const previous = normalizeAdminOrderStatus(adminState.orders.find((order) => order.orderNo === select.dataset.statusOrder)?.status || "待收訂金");
+  const currentOrder = adminState.orders.find((order) => order.orderNo === select.dataset.statusOrder);
+  const previous = normalizeAdminOrderStatus(currentOrder?.status || "待收訂金");
   const next = select.value;
   select.disabled = true;
   const confirmed = await confirmOrderStatusChange(select.dataset.statusOrder, previous, next);
@@ -402,7 +429,13 @@ async function handleOrderStatusChange(event) {
   }
   try {
     const result = await adminPost(next === "已取消"
-      ? { action: "adminCancelOrder", orderNo: select.dataset.statusOrder }
+      ? {
+          action: "adminCancelOrder",
+          orderNo: select.dataset.statusOrder,
+          reason: currentOrder?.mallPaymentExpired
+            ? "已超過 iOPEN Mall 付款期限，管理員確認關閉賣場後結案。"
+            : "此訂單已由管理員取消。",
+        }
       : { action: "adminUpdateOrderStatus", orderNo: select.dataset.statusOrder, status: next });
     if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
     const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
@@ -642,6 +675,7 @@ function setAdminStatus(message, hidden = false) { const el = document.getElemen
 function friendlyAdminError(message) { if (message === "ADMIN_FORBIDDEN") return "這個 LINE 帳號沒有管理員權限。"; if (message === "API_NOT_CONFIGURED") return "請先在 config.js 設定 GAS API 網址。"; if (message === "LIFF_NOT_CONFIGURED") return "請先在 config.js 設定 LIFF ID。"; return "目前無法開啟後台，請稍後再試。"; }
 function parseVariants(value) { return String(value || "").split(/[、,\n]/).map((item) => item.trim()).filter(Boolean); }
 function formatNumber(value) { return Number(value || 0).toLocaleString("zh-TW"); }
+function formatLineMessageType(value) { return ({ text: "文字", image: "圖片", file: "檔案", video: "影片", audio: "語音", location: "位置", sticker: "貼圖" })[String(value || "")] || "訊息"; }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]); }
 function escapeAttr(value) { return escapeHtml(value).replace(/'/g, "&#39;"); }
 function showToast(message) { const toast = document.getElementById("toast"); toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2400); }

@@ -51,7 +51,7 @@
       <section class="admin-page-panel" id="adminOrdersPage">
 
       <section class="purchase-summary-card">
-        <div class="purchase-summary-heading"><div><p class="eyebrow">PURCHASE TOTAL</p><h2>採買統計</h2></div><span>不含已取消訂單</span></div>
+        <div class="purchase-summary-heading"><div><p class="eyebrow">PURCHASE TOTAL</p><h2>採買統計</h2></div><span>僅計入已收訂金訂單</span></div>
         <div class="purchase-total-grid">
           <div><strong id="orderCount">0</strong><span>總訂單數</span></div>
           <div><strong id="orderedItemCount">0</strong><span>商品總件數</span></div>
@@ -66,7 +66,7 @@
             <span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></span>
             <input id="orderSearch" type="search" aria-label="搜尋訂單、姓名或電話" placeholder="訂單、姓名或電話" />
           </label>
-          <select id="orderStatusFilter" aria-label="訂單狀態"><option value="active">進行中</option><option value="待收訂金">待收訂金</option><option value="已收到訂金">已收到訂金</option><option value="已開設 iOPEN Mall 賣場">已開設 iOPEN Mall 賣場</option><option value="訂單已完成">訂單已完成</option><option class="status-cancel-option" value="已取消">已取消</option><option value="all">全部訂單</option></select>
+          <select id="orderStatusFilter" aria-label="訂單狀態"><option value="active">進行中</option><option value="待收訂金">待收訂金</option><option value="待確認訂金">待確認訂金</option><option value="已收到訂金">已收到訂金</option><option value="已開設 iOPEN Mall 賣場">已開設 iOPEN Mall 賣場</option><option value="訂單已完成">訂單已完成</option><option class="status-cancel-option" value="已取消">已取消</option><option value="all">全部訂單</option></select>
         </div>
         <div class="admin-order-list" id="adminOrderList"></div>
       </section>

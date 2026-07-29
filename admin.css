@@ -46,12 +46,14 @@
 .admin-order-list { display: grid; gap: 12px; }
 .admin-order-card { overflow: hidden; border: 2px solid transparent; border-radius: 17px; box-shadow: 0 5px 14px rgba(38,76,96,.08); }
 .admin-order-card.pending { --order-status-color: #e77694; border-color: #ef9db2; background: #fff; }
+.admin-order-card.payment-reported { --order-status-color: #5ca4cf; border-color: #5ca4cf; background: #fff; }
 .admin-order-card.deposit-received { --order-status-color: #e6b900; border-color: #e6b900; background: #fff; }
 .admin-order-card.shipped { --order-status-color: #f05e63; border-color: #f05e63; background: #fff; }
 .admin-order-card.completed { --order-status-color: #3f9363; border-color: #72ad88; background: #fff; }
 .admin-order-card.cancelled { --order-status-color: #747d82; border-color: #9aa2a6; background: #fff; }
 .admin-order-card header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; color: white; }
 .admin-order-card.pending header { background: #e77694; }
+.admin-order-card.payment-reported header { background: #5ca4cf; }
 .admin-order-card.deposit-received header { background: #e6b900; }
 .admin-order-card.shipped header { background: #f05e63; }
 .admin-order-card.completed header { background: #72ad88; }
@@ -96,6 +98,15 @@
 .order-reminder textarea { width: 100%; min-height: 102px; padding: 9px; resize: vertical; border: 1px solid var(--order-status-color); border-radius: 6px; background: white; color: var(--ink); font: inherit; font-weight: 600; line-height: 1.45; }
 .order-reminder button { min-height: 42px; padding: 9px; border: 0; border-radius: 18px; background: var(--order-status-color); color: white; font-weight: 700; }
 .reminder-sent { margin: 10px 0 0; color: var(--muted); font-size: .7rem; }
+.line-alert, .mall-expiry-alert { display: grid; gap: 6px; margin-top: 11px; padding: 11px; border-radius: 11px; font-size: .72rem; }
+.line-alert { border: 1px solid #5ca4cf; background: #edf5f8; color: #304b59; }
+.line-alert strong { color: #47748e; font-size: .8rem; }
+.line-alert span, .line-alert small { color: #667c87; }
+.line-alert p, .mall-expiry-alert p { margin: 0; line-height: 1.55; }
+.line-alert button { min-height: 38px; border: 0; border-radius: 10px; background: #47748e; color: white; font-weight: 800; }
+.mall-expiry-alert { border: 1px solid #ef9db2; background: #fff3f5; color: #793443; }
+.mall-expiry-alert strong { color: #c9363e; font-size: .8rem; }
+.admin-order-card.mall-overdue { border-color: #c9363e; }
 .empty-orders { padding: 24px 10px; color: var(--muted); font-size: .78rem; text-align: center; }
 .settings-card { margin: 14px 0; padding: 0 15px; border: 1px solid var(--line); border-radius: 16px; background: white; }
 .settings-card summary { padding: 15px 0; font-weight: 700; cursor: pointer; }
