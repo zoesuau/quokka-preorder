@@ -547,8 +547,7 @@ test("訂單成立卡片只保留傳送匯款資訊訊息按鈕", () => {
   assert.equal(buttons.length, 1);
   assert.equal(buttons[0].action.type, "message");
   assert.equal(buttons[0].action.label, "匯款資訊");
-  assert.match(buttons[0].action.text, /^您好，我想索取匯款資訊/);
-  assert.match(buttons[0].action.text, /訂單編號：QK-TEST/);
+  assert.equal(buttons[0].action.text, "您好，我想索取匯款資訊");
 });
 
 test("歷史訂單捷徑先讀訂單，商品目錄延後背景載入", () => {

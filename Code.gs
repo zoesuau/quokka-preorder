@@ -411,11 +411,7 @@ function readPendingOrderNosByUser_() {
 }
 
 function buildOrderSuccessMessage_(order) {
-  var transferRequestText =
-    "您好，我想索取匯款資訊\n訂單編號：" +
-    order.orderNo +
-    "\n收件人姓名：" +
-    order.customerName;
+  var transferRequestText = "您好，我想索取匯款資訊";
   var bodyContents = [
     {
       type: "text",
@@ -666,11 +662,7 @@ function buildUnifiedOrderSuccessCard_(order) {
     paymentDue = new Date(
       paymentDue.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
     );
-  var transferRequestText =
-    "您好，我想索取匯款資訊\n訂單編號：" +
-    order.orderNo +
-    "\n收件人姓名：" +
-    order.customerName;
+  var transferRequestText = "您好，我想索取匯款資訊";
   return buildUnifiedOrderCard_(
     order,
     "已收到預購訂單",
