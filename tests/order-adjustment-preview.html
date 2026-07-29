@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="../style.css" />
+    <link rel="stylesheet" href="../admin.css" />
+    <title>訂單調整介面檢查</title>
+  </head>
+  <body class="admin-page">
+    <main class="admin-main">
+      <section class="admin-orders-section">
+        <div class="admin-order-list">
+          <article class="admin-order-card deposit-received">
+            <header>
+              <div><span>已收到訂金</span><h3>Zoe</h3></div>
+              <b>QK260729-DEMO01</b>
+            </header>
+            <div class="order-card-toolbar"><button type="button">調整訂單</button></div>
+            <div class="packing-items">
+              <div class="order-item-previous">
+                <span class="order-item-copy"><em>原訂</em><strong>QUOKSCOUT Flattfur Keyring（鑰匙圈）</strong><small>BOBO</small></span><b>× 4</b>
+              </div>
+              <div class="order-item-current">
+                <span class="order-item-copy"><em>目前</em><strong>QUOKSCOUT Flattfur Keyring（鑰匙圈）</strong><small>BOBO</small></span><b>× 2</b>
+              </div>
+              <div>
+                <span class="order-item-copy"><strong>Everybody COCOCUP! Miniature（熱可可公仔）</strong><small>BOBO</small></span><b>× 1</b>
+              </div>
+            </div>
+            <div class="order-summary-box">
+              <div class="order-primary-amount"><span>剩餘金額</span><strong>NT $1,178</strong></div>
+              <dl class="customer-details">
+                <div><dt>訂購人</dt><dd>Zoe　0432 414 238</dd></div>
+                <div><dt>備註</dt><dd>無</dd></div>
+                <div><dt>訂單金額</dt><dd class="order-accent">NT $2,678</dd></div>
+                <div><dt>訂金金額</dt><dd>NT $1,500</dd></div>
+              </dl>
+              <details class="order-adjustment-history" open>
+                <summary><span>查看調整紀錄（1）</span><b>2026-07-29 14:30:00</b></summary>
+                <div class="order-adjustment-history-list">
+                  <section>
+                    <div><strong>2026-07-29 14:30:00</strong><span>已收到訂金</span></div>
+                    <ul><li>QUOKSCOUT Flattfur Keyring（鑰匙圈）｜BOBO：4 → 2</li></ul>
+                    <p>訂單金額 NT $3,178 → NT $2,678</p>
+                    <small>LINE 通知已於 2026-07-29 14:30:02 送出</small>
+                  </section>
+                </div>
+              </details>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+    <dialog class="order-editor-dialog" open>
+      <form>
+        <p class="eyebrow">ORDER ITEMS</p>
+        <h2>調整訂單</h2>
+        <p>QK260729-DEMO01｜目前狀態：已收到訂金</p>
+        <div class="order-editor-items">
+          <div class="order-editor-item">
+            <label><span>商品</span><select><option>QUOKSCOUT Flattfur Keyring（鑰匙圈）</option></select></label>
+            <label><span>款式</span><select><option>BOBO</option></select></label>
+            <label class="order-editor-qty"><span>數量</span><input type="number" value="2" /></label>
+            <button class="order-editor-remove" type="button">移除</button>
+          </div>
+          <div class="order-editor-item">
+            <label><span>商品</span><select><option>Everybody COCOCUP! Miniature（熱可可公仔）</option></select></label>
+            <label><span>款式</span><select><option>BOBO</option></select></label>
+            <label class="order-editor-qty"><span>數量</span><input type="number" value="1" /></label>
+            <button class="order-editor-remove" type="button">移除</button>
+          </div>
+        </div>
+        <button class="order-editor-add" type="button">＋ 新增商品</button>
+        <div class="order-editor-preview">
+          <div><span>調整前總額</span><strong>NT $3,178</strong></div>
+          <div><span>調整後總額</span><strong>NT $2,678</strong></div>
+          <div><span>原訂金保留</span><strong>NT $1,500</strong></div>
+          <div><span>後續應付</span><strong>NT $1,178</strong></div>
+        </div>
+        <p class="order-editor-warning">訂金已核帳：儲存後不會改寫已收訂金；若有溢付，後台會顯示待處理差額。</p>
+        <div class="status-confirm-actions">
+          <button type="button">返回</button>
+          <button class="status-confirm-submit" type="button">確認修改並通知</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

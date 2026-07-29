@@ -54,6 +54,10 @@ var ORDER_HEADERS_ = [
   "cashRefundedAt",
   "shortageNotificationSentAt",
   "paymentReportedAt",
+  "orderAdjustmentsJson",
+  "orderAdjustedAt",
+  "orderAdjustmentNotificationSentAt",
+  "orderRevision",
 ];
 
 var ORDER_STATUS_PENDING_ = "待收訂金";
@@ -121,6 +125,7 @@ function doPost(e) {
     if (action === "adminCancelOrder") return handleAdminCancelOrder_(data);
     if (action === "adminAdjustOrderShortage")
       return handleAdminAdjustOrderShortage_(data);
+    if (action === "adminAdjustOrder") return handleAdminAdjustOrder_(data);
     if (action === "adminConfirmCashRefund")
       return handleAdminConfirmCashRefund_(data);
     if (action === "adminResolveLineAlert")
@@ -821,6 +826,74 @@ function buildUnifiedShortageCard_(order) {
   );
 }
 
+function buildUnifiedOrderAdjustmentCard_(order) {
+  var status = normalizeOrderStatus_(order.status, "");
+  var changeText = (order.changes || [])
+    .map(function (change) {
+      var item = change.after || change.before || {};
+      var label =
+        item.name + (item.variant ? "｜" + item.variant : "");
+      if (change.type === "added")
+        return "・新增 " + label + " × " + change.after.qty;
+      if (change.type === "removed")
+        return "・取消 " + label + " × " + change.before.qty;
+      return (
+        "・調整 " +
+        label +
+        "：" +
+        change.before.qty +
+        " → " +
+        change.after.qty
+      );
+    })
+    .join("\n");
+  var message =
+    "訂單內容已由管理員更新：\n" +
+    changeText +
+    "\n\n訂單狀態維持「" +
+    status +
+    "」。";
+  if (status === ORDER_STATUS_PENDING_) {
+    var dueAt = parseOrderDate_(order.createdAt);
+    if (dueAt)
+      dueAt = new Date(
+        dueAt.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
+      );
+    message +=
+      "\n付款期限仍為 " +
+      (dueAt ? formatDateTime_(dueAt) : "原訂單成立後 24 小時") +
+      "，不會因本次修改延長。";
+  } else if (status === ORDER_STATUS_PAYMENT_REPORTED_) {
+    message += "\n您回報的匯款資料仍保留，將由管理員核帳確認。";
+  } else if (order.adjustmentDue > 0) {
+    message +=
+      "\n調整後產生溢付 NT$" +
+      formatMoney_(order.adjustmentDue) +
+      "，將由管理員後續處理。";
+  }
+  return buildUnifiedOrderCard_(
+    order,
+    "訂單內容已更新",
+    message,
+    {
+      depositLabel:
+        status === ORDER_STATUS_PENDING_ ? "應付訂金（50%）" : "原訂金保留",
+      balanceLabel: "調整後後續應付",
+      extraRows: [
+        {
+          label: "調整前金額",
+          value: "NT$" + formatMoney_(order.previousTotal),
+        },
+        {
+          label: "調整後金額",
+          value: "NT$" + formatMoney_(order.adjustedTotal),
+          color: "#EF0025",
+        },
+      ],
+    },
+  );
+}
+
 function formatMoney_(value) {
   return Math.round(number_(value))
     .toString()
@@ -1009,6 +1082,10 @@ function readAdminOrders_() {
         cashRefundedAt: row[27],
         shortageNotificationSentAt: row[28],
         paymentReportedAt: row[29],
+        orderAdjustments: parseJsonArray_(row[30]),
+        orderAdjustedAt: row[31],
+        orderAdjustmentNotificationSentAt: row[32],
+        orderRevision: number_(row[33]),
         paymentDueText: createdAt
           ? formatDateTime_(
               new Date(
@@ -1375,6 +1452,316 @@ function handleAdminCancelOrder_(data) {
   return json_({ ok: true, order: result });
 }
 
+function orderItemKey_(item) {
+  return (
+    String((item && item.productId) || "").trim() +
+    "\u0001" +
+    String((item && item.variant) || "").trim()
+  );
+}
+
+function summarizeOrderItems_(items) {
+  return items
+    .map(function (item) {
+      return (
+        item.name +
+        (item.variant ? "｜" + item.variant : "") +
+        " × " +
+        item.qty
+      );
+    })
+    .join("\n");
+}
+
+function buildOrderItemChanges_(previousItems, adjustedItems) {
+  var previousByKey = {};
+  var adjustedByKey = {};
+  previousItems.forEach(function (item) {
+    previousByKey[orderItemKey_(item)] = item;
+  });
+  adjustedItems.forEach(function (item) {
+    adjustedByKey[orderItemKey_(item)] = item;
+  });
+  var changes = [];
+  Object.keys(previousByKey).forEach(function (key) {
+    var before = previousByKey[key];
+    var after = adjustedByKey[key];
+    if (!after) {
+      changes.push({ type: "removed", before: before, after: null });
+    } else if (number_(before.qty) !== number_(after.qty)) {
+      changes.push({ type: "quantity", before: before, after: after });
+    }
+  });
+  Object.keys(adjustedByKey).forEach(function (key) {
+    if (!previousByKey[key])
+      changes.push({
+        type: "added",
+        before: null,
+        after: adjustedByKey[key],
+      });
+  });
+  return changes;
+}
+
+function handleAdminAdjustOrder_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var orderNo = String(data.orderNo || "").trim();
+  var requestedItems = Array.isArray(data.items) ? data.items : [];
+  var adjustmentId = String(data.adjustmentId || "").trim().slice(0, 100);
+  var expectedRevision = Number(data.expectedRevision || 0);
+  var expectedStatus = normalizeOrderStatus_(
+    String(data.expectedStatus || ""),
+    "",
+  );
+  if (!orderNo || !requestedItems.length || !adjustmentId)
+    throw new Error("INVALID_ORDER_ADJUSTMENT");
+
+  var lock = LockService.getScriptLock();
+  var result;
+  var notificationTarget;
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var rowNumber = findOrderRow_(sheet, orderNo);
+    if (!rowNumber) throw new Error("ORDER_NOT_FOUND");
+    var row = sheet
+      .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
+      .getDisplayValues()[0];
+    var history = parseJsonArray_(row[30]);
+    var duplicate = history.some(function (entry) {
+      return String((entry && entry.adjustmentId) || "") === adjustmentId;
+    });
+    if (duplicate) {
+      return json_({
+        ok: true,
+        duplicate: true,
+        order: { orderNo: orderNo, notificationAttempted: false },
+      });
+    }
+    var status = normalizeOrderStatus_(row[15], row[17]);
+    if (
+      [
+        ORDER_STATUS_PENDING_,
+        ORDER_STATUS_PAYMENT_REPORTED_,
+        ORDER_STATUS_DEPOSIT_RECEIVED_,
+      ].indexOf(status) < 0
+    )
+      throw new Error("ORDER_EDIT_NOT_ALLOWED");
+    if (expectedStatus !== status) throw new Error("ORDER_CHANGED");
+    var currentRevision = number_(row[33]);
+    if (expectedRevision !== currentRevision) throw new Error("ORDER_CHANGED");
+
+    var previousItems = parseJsonArray_(row[6]);
+    if (!previousItems.length) throw new Error("NO_ITEMS_TO_ADJUST");
+    var previousByKey = {};
+    previousItems.forEach(function (item) {
+      previousByKey[orderItemKey_(item)] = item;
+    });
+    var products = readProducts_();
+    var productById = {};
+    products.forEach(function (product) {
+      productById[product.id] = product;
+    });
+
+    var requestedByKey = {};
+    requestedItems.forEach(function (sourceItem) {
+      var productId = String(
+        (sourceItem && sourceItem.productId) || "",
+      ).trim();
+      var variant = String((sourceItem && sourceItem.variant) || "").trim();
+      var qty = Number(sourceItem && sourceItem.qty);
+      var key = orderItemKey_({ productId: productId, variant: variant });
+      if (
+        !productId ||
+        !Number.isInteger(qty) ||
+        qty < 1 ||
+        qty > 20 ||
+        requestedByKey[key]
+      )
+        throw new Error("INVALID_ORDER_ADJUSTMENT");
+      requestedByKey[key] = { productId: productId, variant: variant, qty: qty };
+    });
+
+    var adjustedItems = [];
+    var totalQty = 0;
+    var adjustedTotal = 0;
+    Object.keys(requestedByKey).forEach(function (key) {
+      var requested = requestedByKey[key];
+      var existing = previousByKey[key];
+      var product = productById[requested.productId];
+      var unitPrice;
+      var name;
+      if (existing) {
+        unitPrice =
+          number_(existing.unitPriceTwd) ||
+          Math.round(number_(existing.subtotalTwd) / number_(existing.qty));
+        name = String(existing.name || "");
+      } else {
+        if (
+          !product ||
+          !product.active ||
+          (product.variants.length &&
+            product.variants.indexOf(requested.variant) < 0) ||
+          (!product.variants.length && requested.variant)
+        )
+          throw new Error("PRODUCT_CHANGED");
+        unitPrice = number_(product.priceTwd);
+        name = product.name;
+      }
+      var item = {
+        productId: requested.productId,
+        name: name,
+        variant: requested.variant,
+        qty: requested.qty,
+        unitPriceTwd: unitPrice,
+        subtotalTwd: unitPrice * requested.qty,
+      };
+      adjustedItems.push(item);
+      totalQty += requested.qty;
+      adjustedTotal += item.subtotalTwd;
+    });
+    if (!adjustedItems.length || totalQty > 100)
+      throw new Error("INVALID_ORDER_ADJUSTMENT");
+
+    var changes = buildOrderItemChanges_(previousItems, adjustedItems);
+    if (!changes.length) throw new Error("NO_ORDER_CHANGES");
+    var previousTotal = number_(row[9]);
+    var previousDeposit = number_(row[10]);
+    var previousBalance = number_(row[11]);
+    var adjustedDeposit =
+      status === ORDER_STATUS_PENDING_
+        ? Math.ceil(adjustedTotal * 0.5)
+        : previousDeposit;
+    var adjustedBalance = Math.max(adjustedTotal - adjustedDeposit, 0);
+    var adjustmentDue =
+      status === ORDER_STATUS_DEPOSIT_RECEIVED_
+        ? Math.max(adjustedDeposit - adjustedTotal, 0)
+        : 0;
+    var adjustedAt = formatDateTime_(new Date());
+    var nextRevision = currentRevision + 1;
+    var historyEntry = {
+      adjustmentId: adjustmentId,
+      adjustedAt: adjustedAt,
+      status: status,
+      previousTotal: previousTotal,
+      adjustedTotal: adjustedTotal,
+      previousDeposit: previousDeposit,
+      adjustedDeposit: adjustedDeposit,
+      previousBalance: previousBalance,
+      adjustedBalance: adjustedBalance,
+      changes: changes,
+      revision: nextRevision,
+    };
+    history.push(historyEntry);
+    var itemsSummary = summarizeOrderItems_(adjustedItems);
+
+    sheet
+      .getRange(rowNumber, 7, 1, 6)
+      .setValues([
+        [
+          JSON.stringify(adjustedItems),
+          itemsSummary,
+          totalQty,
+          adjustedTotal,
+          adjustedDeposit,
+          adjustedBalance,
+        ],
+      ]);
+    if (status === ORDER_STATUS_DEPOSIT_RECEIVED_)
+      sheet
+        .getRange(rowNumber, 27, 1, 2)
+        .setValues([[adjustmentDue, ""]]);
+    sheet
+      .getRange(rowNumber, 31, 1, 4)
+      .setValues([
+        [JSON.stringify(history), adjustedAt, "", nextRevision],
+      ]);
+
+    result = {
+      orderNo: orderNo,
+      items: adjustedItems,
+      itemsSummary: itemsSummary,
+      totalQty: totalQty,
+      estimatedTotal: adjustedTotal,
+      depositTotal: adjustedDeposit,
+      estimatedBalance: adjustedBalance,
+      status: status,
+      cashRefundDue:
+        status === ORDER_STATUS_DEPOSIT_RECEIVED_
+          ? adjustmentDue
+          : number_(row[26]),
+      orderAdjustments: history,
+      orderAdjustedAt: adjustedAt,
+      orderRevision: nextRevision,
+    };
+    notificationTarget = {
+      lineUserId: row[2],
+      orderNo: orderNo,
+      createdAt: row[1],
+      customerName: row[4],
+      itemsSummary: itemsSummary,
+      totalQty: totalQty,
+      estimatedTotal: adjustedTotal,
+      depositTotal: adjustedDeposit,
+      estimatedBalance: adjustedBalance,
+      status: status,
+      previousTotal: previousTotal,
+      adjustedTotal: adjustedTotal,
+      changes: changes,
+      adjustmentDue: adjustmentDue,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+
+  var notificationSent = pushLineMessage_(
+    notificationTarget.lineUserId,
+    buildUnifiedOrderAdjustmentCard_(notificationTarget),
+    "order adjustment " + orderNo,
+  );
+  var notificationSentAt = notificationSent ? formatDateTime_(new Date()) : "";
+  if (notificationSentAt) {
+    var notificationLock = LockService.getScriptLock();
+    notificationLock.waitLock(10000);
+    try {
+      var notificationSheet = spreadsheet_().getSheetByName("Preorders");
+      var notificationRow = findOrderRow_(notificationSheet, orderNo);
+      if (notificationRow) {
+        var savedHistory = parseJsonArray_(
+          notificationSheet.getRange(notificationRow, 31).getDisplayValue(),
+        );
+        var savedEntry;
+        savedHistory.forEach(function (entry) {
+          if (String(entry.adjustmentId || "") === adjustmentId)
+            savedEntry = entry;
+        });
+        if (savedEntry) {
+          savedEntry.notificationSentAt = notificationSentAt;
+          notificationSheet
+            .getRange(notificationRow, 31)
+            .setValue(JSON.stringify(savedHistory));
+          result.orderAdjustments = savedHistory;
+        }
+        if (
+          savedHistory.length &&
+          String(savedHistory[savedHistory.length - 1].adjustmentId || "") ===
+            adjustmentId
+        )
+          notificationSheet
+            .getRange(notificationRow, 33)
+            .setValue(notificationSentAt);
+      }
+    } finally {
+      notificationLock.releaseLock();
+    }
+  }
+  result.notificationAttempted = true;
+  result.notificationSent = notificationSent;
+  result.orderAdjustmentNotificationSentAt = notificationSentAt;
+  return json_({ ok: true, order: result });
+}
+
 function handleAdminAdjustOrderShortage_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var orderNo = String(data.orderNo || "").trim();
@@ -1468,6 +1855,7 @@ function handleAdminAdjustOrderShortage_(data) {
     var cashRefundDue = Math.max(depositTotal - adjustedTotal, 0);
     var adjustedAt = formatDateTime_(new Date());
     var adjustments = parseJsonArray_(row[24]);
+    var nextOrderRevision = number_(row[33]) + 1;
     adjustments.push({
       adjustedAt: adjustedAt,
       previousTotal: previousTotal,
@@ -1526,6 +1914,7 @@ function handleAdminAdjustOrderShortage_(data) {
           "",
         ],
       ]);
+    sheet.getRange(rowNumber, 34).setValue(nextOrderRevision);
 
     result = {
       orderNo: orderNo,
@@ -1544,6 +1933,7 @@ function handleAdminAdjustOrderShortage_(data) {
       shortageAdjustedAt: adjustedAt,
       cashRefundDue: cashRefundDue,
       cashRefundedAt: "",
+      orderRevision: nextOrderRevision,
     };
     notificationTarget = {
       lineUserId: row[2],
@@ -2615,6 +3005,11 @@ function safeError_(error) {
     "ORDER_NOT_FOUND",
     "ORDER_FORBIDDEN",
     "INVALID_ORDER_STATUS",
+    "INVALID_ORDER_ADJUSTMENT",
+    "ORDER_EDIT_NOT_ALLOWED",
+    "ORDER_CHANGED",
+    "NO_ORDER_CHANGES",
+    "NO_ITEMS_TO_ADJUST",
     "INVALID_REMINDER",
     "REMINDER_NOT_DUE",
     "LINE_PUSH_FAILED",

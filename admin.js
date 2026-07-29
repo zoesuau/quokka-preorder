@@ -51,6 +51,12 @@ function bindAdminEvents() {
   document.getElementById("shortageForm").addEventListener("submit", submitShortageAdjustment);
   document.getElementById("shortageItemList").addEventListener("input", updateShortagePreview);
   document.getElementById("shortageDialogClose").addEventListener("click", () => document.getElementById("shortageDialog").close());
+  document.getElementById("orderEditorForm").addEventListener("submit", submitOrderAdjustment);
+  document.getElementById("orderEditorItems").addEventListener("input", updateOrderEditorPreview);
+  document.getElementById("orderEditorItems").addEventListener("change", handleOrderEditorItemChange);
+  document.getElementById("orderEditorItems").addEventListener("click", handleOrderEditorItemClick);
+  document.getElementById("orderEditorAdd").addEventListener("click", () => addOrderEditorRow());
+  document.getElementById("orderEditorClose").addEventListener("click", () => document.getElementById("orderEditorDialog").close());
   document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
   document.getElementById("orderStatusFilter").addEventListener("change", renderAdminOrders);
   document.getElementById("bankQrInput").addEventListener("change", uploadBankQr);
@@ -189,6 +195,9 @@ function renderAdminOrderCard(order) {
   const displayStatus = order.mallPaymentExpired ? "賣場付款已逾期／待確認" : status;
   const items = Array.isArray(order.items) ? order.items : [];
   const shortageHistory = Array.isArray(order.shortageAdjustments) ? order.shortageAdjustments : [];
+  const adjustmentHistory = Array.isArray(order.orderAdjustments) ? order.orderAdjustments : [];
+  const latestAdjustment = adjustmentHistory[adjustmentHistory.length - 1] || null;
+  const canEditOrder = ["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金"].includes(status);
   const canAdjustShortage = ["已收到訂金", IOPEN_MALL_READY_STATUS].includes(status) && items.length > 0;
   const primaryAmount = ["待收訂金", PAYMENT_REPORTED_STATUS].includes(status)
     ? { label: "訂金金額", value: order.depositTotal }
@@ -214,7 +223,8 @@ function renderAdminOrderCard(order) {
     : "";
   return `<article class="admin-order-card ${statusClass} ${order.mallPaymentExpired ? "mall-overdue" : ""}" data-order-card="${escapeAttr(order.orderNo)}">
     <header><div><span>${escapeHtml(displayStatus)}</span><h3>${escapeHtml(order.lineDisplayName || order.customerName || "未命名")}</h3></div><b>${escapeHtml(order.orderNo)}</b></header>
-    <div class="packing-items">${items.map((item) => `<div><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<b>× ${formatNumber(item.qty)}</b></div>`).join("") || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
+    ${canEditOrder ? `<div class="order-card-toolbar"><button type="button" data-edit-order="${escapeAttr(order.orderNo)}">${status === "待收訂金" ? "編輯訂單" : "調整訂單"}</button></div>` : ""}
+    <div class="packing-items">${renderAdjustedOrderItems(items, latestAdjustment) || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
     <div class="order-summary-box">
       <div class="order-primary-amount"><span>${primaryAmount.label}</span><strong>NT $${formatNumber(primaryAmount.value)}</strong></div>
       <dl class="customer-details">
@@ -228,6 +238,7 @@ function renderAdminOrderCard(order) {
       </div>
       ${lineAlert}
       ${mallExpiry}
+      ${adjustmentHistory.length ? renderOrderAdjustmentHistory(order, adjustmentHistory) : ""}
       ${shortageHistory.length ? renderShortageHistory(order, shortageHistory) : ""}
       ${order.reminderDue ? `<div class="order-reminder"><label>12小時未收到訂金通知<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
       ${order.mallReminderDue ? `<div class="order-reminder"><label>七天賣場取消通知<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">七天賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
@@ -235,9 +246,57 @@ function renderAdminOrderCard(order) {
   </article>`;
 }
 
+function adminOrderItemKey(item) {
+  return `${String(item?.productId || "")}\u0001${String(item?.variant || "")}`;
+}
+
+function renderAdjustedOrderItems(items, latestAdjustment) {
+  const changes = Array.isArray(latestAdjustment?.changes) ? latestAdjustment.changes : [];
+  const affectedCurrent = new Map();
+  const previousLines = changes.flatMap((change) => {
+    if (change.after) affectedCurrent.set(adminOrderItemKey(change.after), change.type === "added" ? "新增" : "目前");
+    if (!change.before || change.type === "added") return [];
+    const item = change.before;
+    return [`<div class="order-item-previous"><span class="order-item-copy"><em>原訂</em><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}</span><b>× ${formatNumber(item.qty)}</b></div>`];
+  });
+  const currentLines = items.map((item) => {
+    const badge = affectedCurrent.get(adminOrderItemKey(item));
+    return `<div class="${badge ? "order-item-current" : ""}"><span class="order-item-copy">${badge ? `<em>${badge}</em>` : ""}<strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}</span><b>× ${formatNumber(item.qty)}</b></div>`;
+  });
+  return previousLines.concat(currentLines).join("");
+}
+
+function renderOrderAdjustmentHistory(order, history) {
+  const entries = [...history].reverse();
+  return `<details class="order-adjustment-history">
+    <summary><span>查看調整紀錄（${formatNumber(history.length)}）</span><b>${escapeHtml(order.orderAdjustedAt || entries[0]?.adjustedAt || "")}</b></summary>
+    <div class="order-adjustment-history-list">${entries.map((entry) => {
+      const changes = Array.isArray(entry.changes) ? entry.changes : [];
+      return `<section><div><strong>${escapeHtml(entry.adjustedAt || "")}</strong><span>${escapeHtml(entry.status || "")}</span></div>
+        <ul>${changes.map((change) => {
+          const item = change.after || change.before || {};
+          const name = `${item.name || ""}${item.variant ? `｜${item.variant}` : ""}`;
+          const text = change.type === "added"
+            ? `新增 ${name} × ${change.after?.qty || 0}`
+            : change.type === "removed"
+              ? `取消 ${name} × ${change.before?.qty || 0}`
+              : `${name}：${change.before?.qty || 0} → ${change.after?.qty || 0}`;
+          return `<li>${escapeHtml(text)}</li>`;
+        }).join("")}</ul>
+        <p>訂單金額 NT $${formatNumber(entry.previousTotal)} → NT $${formatNumber(entry.adjustedTotal)}</p>
+        <small>${entry.notificationSentAt ? `LINE 通知已於 ${escapeHtml(entry.notificationSentAt)} 送出` : "LINE 通知未送達"}</small>
+      </section>`;
+    }).join("")}</div>
+  </details>`;
+}
+
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-reminder-order], [data-mall-reminder-order], [data-shortage-order], [data-refund-order], [data-resolve-line-order]");
+  const button = event.target.closest("[data-edit-order], [data-reminder-order], [data-mall-reminder-order], [data-shortage-order], [data-refund-order], [data-resolve-line-order]");
   if (!button) return;
+  if (button.dataset.editOrder) {
+    openOrderEditor(button.dataset.editOrder);
+    return;
+  }
   if (button.dataset.resolveLineOrder) {
     if (!window.confirm("確定已核對這位顧客的 LINE 訊息？解除保護後，超過內部寬限時間且仍未確認訂金的訂單，會在下一次排程自動取消。")) return;
     button.disabled = true;
@@ -296,6 +355,172 @@ function renderShortageHistory(order, history) {
     <div class="shortage-payment">${paymentLine}</div>
     <small>${order.shortageNotificationSentAt ? `LINE 通知已於 ${escapeHtml(order.shortageNotificationSentAt)} 送出` : "LINE 通知未送達"}</small>
   </section>`;
+}
+
+function getOrderEditorContext() {
+  const orderNo = document.getElementById("orderEditorOrderNo").value;
+  return adminState.orders.find((entry) => entry.orderNo === orderNo);
+}
+
+function orderEditorProductOptions(currentItem) {
+  const choices = adminState.products.filter((product) => product.active || product.id === currentItem?.productId);
+  if (currentItem?.productId && !choices.some((product) => product.id === currentItem.productId)) {
+    choices.unshift({ id: currentItem.productId, name: currentItem.name, active: false });
+  }
+  return choices.map((product) => `<option value="${escapeAttr(product.id)}" ${product.id === currentItem?.productId ? "selected" : ""}>${escapeHtml(product.name)}${product.active ? "" : "（原訂商品）"}</option>`).join("");
+}
+
+function orderEditorVariantOptions(product, selectedVariant, allowOriginalOnly = false) {
+  let variants = allowOriginalOnly ? [selectedVariant] : [...(product?.variants || [])];
+  if (selectedVariant && !variants.includes(selectedVariant)) variants.unshift(selectedVariant);
+  if (!variants.length) variants = [""];
+  return variants.map((variant) => `<option value="${escapeAttr(variant)}" ${variant === selectedVariant ? "selected" : ""}>${escapeHtml(variant || "無款式")}</option>`).join("");
+}
+
+function addOrderEditorRow(item = null) {
+  const list = document.getElementById("orderEditorItems");
+  const defaultProduct = item
+    ? adminState.products.find((product) => product.id === item.productId)
+    : adminState.products.find((product) => product.active);
+  if (!item && !defaultProduct) return showToast("目前沒有可新增的上架商品");
+  const source = item || {
+    productId: defaultProduct.id,
+    name: defaultProduct.name,
+    variant: defaultProduct.variants?.[0] || "",
+    qty: 1,
+    unitPriceTwd: defaultProduct.priceTwd,
+  };
+  const product = adminState.products.find((entry) => entry.id === source.productId);
+  const row = document.createElement("div");
+  row.className = "order-editor-item";
+  row.dataset.originalProductId = source.productId || "";
+  row.dataset.originalVariant = source.variant || "";
+  row.dataset.originalName = source.name || "";
+  row.dataset.originalPrice = String(source.unitPriceTwd || (Number(source.subtotalTwd || 0) / Number(source.qty || 1)) || 0);
+  row.innerHTML = `<label><span>商品</span><select data-order-editor-product>${orderEditorProductOptions(source)}</select></label>
+    <label><span>款式</span><select data-order-editor-variant>${orderEditorVariantOptions(product, source.variant || "", Boolean(product && !product.active))}</select></label>
+    <label class="order-editor-qty"><span>數量</span><input data-order-editor-qty type="number" min="1" max="20" step="1" inputmode="numeric" value="${Number(source.qty || 1)}" /></label>
+    <button class="order-editor-remove" type="button" data-order-editor-remove aria-label="移除此品項">移除</button>`;
+  list.appendChild(row);
+  updateOrderEditorPreview();
+}
+
+function openOrderEditor(orderNo) {
+  const order = adminState.orders.find((entry) => entry.orderNo === orderNo);
+  if (!order) return;
+  const status = normalizeAdminOrderStatus(order.status);
+  if (!["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金"].includes(status)) return;
+  document.getElementById("orderEditorOrderNo").value = orderNo;
+  document.getElementById("orderEditorRevision").value = Number(order.orderRevision || 0);
+  document.getElementById("orderEditorTitle").textContent = status === "待收訂金" ? "編輯訂單" : "調整訂單";
+  document.getElementById("orderEditorMessage").textContent = `${orderNo}｜目前狀態：${status}`;
+  document.getElementById("orderEditorItems").innerHTML = "";
+  (order.items || []).forEach((item) => addOrderEditorRow(item));
+  document.getElementById("orderEditorWarning").textContent = status === "待收訂金"
+    ? "尚未收款：儲存後會依新總額重算 50% 訂金，付款期限維持原訂時間。"
+    : status === PAYMENT_REPORTED_STATUS
+      ? "顧客已回報匯款：儲存後保留回報資料與原訂金金額，請核帳時一併確認差額。"
+      : "訂金已核帳：儲存後不會改寫已收訂金；若有溢付，後台會顯示待處理差額。";
+  updateOrderEditorPreview();
+  document.getElementById("orderEditorDialog").showModal();
+}
+
+function handleOrderEditorItemChange(event) {
+  const productSelect = event.target.closest("[data-order-editor-product]");
+  if (!productSelect) return;
+  const row = productSelect.closest(".order-editor-item");
+  const product = adminState.products.find((entry) => entry.id === productSelect.value);
+  const variantSelect = row.querySelector("[data-order-editor-variant]");
+  variantSelect.innerHTML = orderEditorVariantOptions(product, product?.variants?.[0] || "");
+  updateOrderEditorPreview();
+}
+
+function handleOrderEditorItemClick(event) {
+  const button = event.target.closest("[data-order-editor-remove]");
+  if (!button) return;
+  button.closest(".order-editor-item").remove();
+  updateOrderEditorPreview();
+}
+
+function readOrderEditorItems() {
+  return [...document.querySelectorAll("#orderEditorItems .order-editor-item")].map((row) => ({
+    productId: row.querySelector("[data-order-editor-product]").value,
+    variant: row.querySelector("[data-order-editor-variant]").value,
+    qty: Number(row.querySelector("[data-order-editor-qty]").value),
+  }));
+}
+
+function orderEditorUnitPrice(order, item) {
+  const existing = (order.items || []).find((entry) => adminOrderItemKey(entry) === adminOrderItemKey(item));
+  if (existing) return Number(existing.unitPriceTwd || (Number(existing.subtotalTwd || 0) / Number(existing.qty || 1)) || 0);
+  return Number(adminState.products.find((product) => product.id === item.productId)?.priceTwd || 0);
+}
+
+function updateOrderEditorPreview() {
+  const order = getOrderEditorContext();
+  if (!order) return;
+  const items = readOrderEditorItems();
+  const keys = items.map(adminOrderItemKey);
+  const invalidQty = items.some((item) => !Number.isInteger(item.qty) || item.qty < 1 || item.qty > 20);
+  const duplicate = new Set(keys).size !== keys.length;
+  const totalQty = items.reduce((sum, item) => sum + (Number.isFinite(item.qty) ? item.qty : 0), 0);
+  const total = items.reduce((sum, item) => sum + orderEditorUnitPrice(order, item) * (Number.isFinite(item.qty) ? item.qty : 0), 0);
+  const status = normalizeAdminOrderStatus(order.status);
+  const deposit = status === "待收訂金" ? Math.ceil(total * 0.5) : Number(order.depositTotal || 0);
+  const balance = Math.max(total - deposit, 0);
+  const overflow = status === "已收到訂金" ? Math.max(deposit - total, 0) : 0;
+  const error = !items.length
+    ? "訂單不可沒有商品；若要整筆取消，請使用訂單狀態。"
+    : invalidQty
+      ? "每個品項數量須為 1～20。"
+      : totalQty > 100
+        ? "單筆訂單最多 100 件。"
+        : duplicate
+          ? "相同商品與款式不可重複，請合併數量。"
+          : "";
+  document.getElementById("orderEditorPreview").innerHTML = `<div><span>調整前總額</span><strong>NT $${formatNumber(order.estimatedTotal)}</strong></div>
+    <div><span>調整後總額</span><strong>NT $${formatNumber(total)}</strong></div>
+    <div><span>${status === "待收訂金" ? "重算後訂金" : "原訂金保留"}</span><strong>NT $${formatNumber(deposit)}</strong></div>
+    <div><span>${overflow > 0 ? "待處理溢付" : "後續應付"}</span><strong>NT $${formatNumber(overflow || balance)}</strong></div>
+    ${error ? `<p>${escapeHtml(error)}</p>` : ""}`;
+  document.getElementById("orderEditorSubmit").disabled = Boolean(error);
+}
+
+async function submitOrderAdjustment(event) {
+  event.preventDefault();
+  const orderNo = document.getElementById("orderEditorOrderNo").value;
+  const submit = document.getElementById("orderEditorSubmit");
+  submit.disabled = true;
+  submit.textContent = "處理中…";
+  try {
+    const result = await adminPost({
+      action: "adminAdjustOrder",
+      orderNo,
+      expectedRevision: Number(document.getElementById("orderEditorRevision").value || 0),
+      expectedStatus: normalizeAdminOrderStatus(getOrderEditorContext()?.status || ""),
+      adjustmentId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      items: readOrderEditorItems(),
+    });
+    if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
+    document.getElementById("orderEditorDialog").close();
+    await loadAdminProducts();
+    showToast(result.duplicate
+      ? "此筆調整已處理，未重複送出"
+      : result.order.notificationSent
+        ? "訂單已調整並發送通知"
+        : "訂單已調整，但 LINE 通知未送達");
+  } catch (error) {
+    const messages = {
+      NO_ORDER_CHANGES: "訂單內容沒有變更",
+      ORDER_CHANGED: "訂單已在其他頁面更新，請重新整理後再試",
+      ORDER_EDIT_NOT_ALLOWED: "此狀態不可編輯訂單",
+      PRODUCT_CHANGED: "商品已下架或款式已變更，請重新選擇",
+    };
+    showToast(messages[error.message] || "訂單調整失敗，請重新確認");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "確認修改並通知";
+  }
 }
 
 function openShortageDialog(orderNo) {

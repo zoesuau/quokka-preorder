@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260729-shortage" />
+    <link rel="stylesheet" href="admin.css?v=20260729-order-adjustment" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260729-shortage" defer></script>
+    <script src="admin.js?v=20260729-order-adjustment" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -166,6 +166,23 @@
         <div class="status-confirm-actions">
           <button type="submit" value="cancel">返回</button>
           <button class="status-confirm-submit" id="orderStatusConfirmSubmit" type="submit" value="confirm">確認變更</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="order-editor-dialog" id="orderEditorDialog" aria-labelledby="orderEditorTitle">
+      <form id="orderEditorForm">
+        <p class="eyebrow">ORDER ITEMS</p>
+        <h2 id="orderEditorTitle">編輯訂單</h2>
+        <p id="orderEditorMessage"></p>
+        <input id="orderEditorOrderNo" type="hidden" />
+        <input id="orderEditorRevision" type="hidden" />
+        <div class="order-editor-items" id="orderEditorItems"></div>
+        <button class="order-editor-add" id="orderEditorAdd" type="button">＋ 新增商品</button>
+        <div class="order-editor-preview" id="orderEditorPreview"></div>
+        <p class="order-editor-warning" id="orderEditorWarning"></p>
+        <div class="status-confirm-actions">
+          <button id="orderEditorClose" type="button">返回</button>
+          <button class="status-confirm-submit" id="orderEditorSubmit" type="submit">確認修改並通知</button>
         </div>
       </form>
     </dialog>
