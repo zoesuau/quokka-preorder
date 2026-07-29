@@ -14,7 +14,7 @@ function test(name, fn) {
   }
 }
 
-function createHarness(status, overrides = {}) {
+function createHarness(status, overrides = {}, options = {}) {
   const context = { console };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync("Code.gs", "utf8"), context);
@@ -70,10 +70,53 @@ function createHarness(status, overrides = {}) {
       };
     },
   };
+  const eventRows = options.eventRows || [
+    [
+      "event-1",
+      "U123",
+      dateTimeHoursAgo(1),
+      "text",
+      "message-1",
+      "您好，我想索取匯款資訊",
+      "QK-TEST",
+      "待核對",
+      "",
+    ],
+  ];
+  const eventSheet = {
+    getLastRow: () => eventRows.length + 1,
+    getRange(rowNumber, column, rowCount, columnCount = 1) {
+      const start = rowNumber - 2;
+      return {
+        getDisplayValues: () =>
+          eventRows
+            .slice(start, start + rowCount)
+            .map((eventRow) =>
+              eventRow.slice(column - 1, column - 1 + columnCount),
+            ),
+        setValues(values) {
+          values.forEach((valuesRow, rowOffset) => {
+            valuesRow.forEach((value, columnOffset) => {
+              eventRows[start + rowOffset][column - 1 + columnOffset] = value;
+            });
+          });
+          return this;
+        },
+      };
+    },
+  };
+  const pushes = [];
   context.requireAdmin_ = () => {};
   context.verifyLineIdToken_ = () => ({ sub: "U123" });
+  context.Utilities = {
+    parseDate: (text) => new Date(String(text).replace(" ", "T")),
+  };
+  context.Session = { getScriptTimeZone: () => "Asia/Taipei" };
   context.setupQuokkaPreorder = () => {};
-  context.spreadsheet_ = () => ({ getSheetByName: () => sheet });
+  context.spreadsheet_ = () => ({
+    getSheetByName: (name) =>
+      name === "LineInboundEvents" ? eventSheet : sheet,
+  });
   context.findOrderRow_ = () => 2;
   context.readProducts_ = () => [
     {
@@ -95,9 +138,18 @@ function createHarness(status, overrides = {}) {
     getScriptLock: () => ({ waitLock() {}, releaseLock() {} }),
   };
   context.formatDateTime_ = () => "2026-07-29 14:00:00";
-  context.pushLineMessage_ = () => false;
+  context.pushLineMessage_ = (...args) => {
+    pushes.push(args);
+    return Boolean(options.pushResult);
+  };
   context.json_ = (payload) => payload;
-  return { context, row };
+  return { context, row, eventRows, pushes };
+}
+
+function dateTimeHoursAgo(hours) {
+  const date = new Date(Date.now() - hours * 3600000);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function request(items, extra = {}) {
@@ -401,6 +453,118 @@ test("缺貨 LINE 卡片共用金額順序並在溢付時另列待退款", () =>
     "調整後應付尾款",
     "待退款",
   ]);
+});
+
+test("確認收到訂金會同步更新狀態、核對警示並發送通知", () => {
+  const { context, row, eventRows, pushes } = createHarness(
+    "待收訂金",
+    { 1: dateTimeHoursAgo(20) },
+    { pushResult: true },
+  );
+  const result = context.handleAdminResolveLineAlert_({
+    orderNo: "QK-TEST",
+    decision: "received",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.order.status, "已收到訂金");
+  assert.equal(result.order.resolved, 1);
+  assert.equal(row[15], "已收到訂金");
+  assert.equal(eventRows[0][7], "已核對");
+  assert.equal(eventRows[0][8], "2026-07-29 14:00:00");
+  assert.equal(pushes.length, 1);
+  assert.match(pushes[0][1].altText, /已收到訂金/);
+});
+
+test("25小時內的非付款訊息只標記已查看", () => {
+  const { context, row, eventRows, pushes } = createHarness("待收訂金", {
+    1: dateTimeHoursAgo(24.5),
+  });
+  const result = context.handleAdminResolveLineAlert_({
+    orderNo: "QK-TEST",
+    decision: "reviewed",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.order.status, "待收訂金");
+  assert.equal(row[15], "待收訂金");
+  assert.equal(eventRows[0][7], "已核對");
+  assert.equal(pushes.length, 0);
+});
+
+test("滿25小時後不能只解除保護", () => {
+  const { context, row, eventRows } = createHarness("待收訂金", {
+    1: dateTimeHoursAgo(25.01),
+  });
+  assert.throws(
+    () =>
+      context.handleAdminResolveLineAlert_({
+        orderNo: "QK-TEST",
+        decision: "reviewed",
+      }),
+    /ORDER_PAYMENT_OVERDUE/,
+  );
+  assert.equal(row[15], "待收訂金");
+  assert.equal(eventRows[0][7], "待核對");
+});
+
+test("滿25小時的非付款訊息可立即取消、清除警示並通知", () => {
+  const { context, row, eventRows, pushes } = createHarness(
+    "待收訂金",
+    { 1: dateTimeHoursAgo(26) },
+    { pushResult: true },
+  );
+  const result = context.handleAdminResolveLineAlert_({
+    orderNo: "QK-TEST",
+    decision: "cancel_overdue",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.order.status, "已取消");
+  assert.equal(row[15], "已取消");
+  assert.equal(row[17], "未開設賣場");
+  assert.equal(row[20], "2026-07-29 14:00:00");
+  assert.equal(eventRows[0][7], "已核對");
+  assert.equal(pushes.length, 1);
+  assert.match(pushes[0][1].altText, /訂單已取消/);
+});
+
+test("未滿25小時不能提前使用逾期取消", () => {
+  const { context, row, eventRows } = createHarness("待收訂金", {
+    1: dateTimeHoursAgo(24.9),
+  });
+  assert.throws(
+    () =>
+      context.handleAdminResolveLineAlert_({
+        orderNo: "QK-TEST",
+        decision: "cancel_overdue",
+      }),
+    /ORDER_CANCEL_NOT_DUE/,
+  );
+  assert.equal(row[15], "待收訂金");
+  assert.equal(eventRows[0][7], "待核對");
+});
+
+test("警示已被其他頁面處理時不會再改訂單狀態", () => {
+  const { context, row, pushes } = createHarness(
+    "待收訂金",
+    { 1: dateTimeHoursAgo(20) },
+    { eventRows: [], pushResult: true },
+  );
+  assert.throws(
+    () =>
+      context.handleAdminResolveLineAlert_({
+        orderNo: "QK-TEST",
+        decision: "received",
+      }),
+    /LINE_ALERT_ALREADY_RESOLVED/,
+  );
+  assert.equal(row[15], "待收訂金");
+  assert.equal(pushes.length, 0);
+});
+
+test("一般狀態選單不再顯示顧客回報選項", () => {
+  const adminSource = fs.readFileSync("admin.js", "utf8");
+  assert.equal(adminSource.includes("（顧客回報）"), false);
+  assert.equal(adminSource.includes("data-resolve-line-order"), false);
+  assert.equal(adminSource.includes("處理 LINE 訊息"), true);
 });
 
 console.log(`\n${passed} 個訂單調整測試全部通過`);

@@ -213,7 +213,7 @@ function renderAdminOrderCard(order) {
           ? `<div><dt>訂金金額</dt><dd>NT $${formatNumber(order.depositTotal)}</dd></div><div><dt>訂單金額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>`
           : `<div><dt>訂單金額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>${order.cancelledAt ? `<div><dt>取消時間</dt><dd>${escapeHtml(order.cancelledAt)}</dd></div>` : ""}`;
   const lineAlert = Number(order.lineAlertCount || 0) > 0
-    ? `<section class="line-alert"><strong>LINE 有新訊息待核對</strong><span>${formatNumber(order.lineAlertCount)} 則・${escapeHtml(formatLineMessageType(order.latestLineAlert?.messageType))}・${escapeHtml(order.latestLineAlert?.receivedAt || "")}</span>${order.latestLineAlert?.textPreview ? `<p>${escapeHtml(order.latestLineAlert.textPreview)}</p>` : ""}<small>核對前系統不會自動取消這筆訂單。</small><button type="button" data-resolve-line-order="${escapeAttr(order.orderNo)}">已查看，解除保護</button></section>`
+    ? `<section class="line-alert"><strong>LINE 有新訊息待核對</strong><span>${formatNumber(order.lineAlertCount)} 則・${escapeHtml(formatLineMessageType(order.latestLineAlert?.messageType))}・${escapeHtml(order.latestLineAlert?.receivedAt || "")}</span>${order.latestLineAlert?.textPreview ? `<p>${escapeHtml(order.latestLineAlert.textPreview)}</p>` : ""}<small>${order.autoCancelOverdue ? "此訂單已超過內部處理期限，請確認是否收到訂金。" : "核對前系統不會自動取消這筆訂單。"}</small><details class="line-alert-menu"><summary>處理 LINE 訊息</summary><div class="line-alert-options"><button type="button" data-line-decision="received" data-line-order="${escapeAttr(order.orderNo)}">確認已收到訂金</button><button class="${order.autoCancelOverdue ? "is-cancel" : "is-reviewed"}" type="button" data-line-decision="${order.autoCancelOverdue ? "cancel_overdue" : "reviewed"}" data-line-order="${escapeAttr(order.orderNo)}">${order.autoCancelOverdue ? "不是付款訊息，逾期取消並通知" : "不是付款訊息，標記已查看"}</button></div></details></section>`
     : "";
   const mallExpiry = order.mallPaymentExpired
     ? `<section class="mall-expiry-alert"><strong>賣場付款已逾期／待確認</strong><span>付款期限：${escapeHtml(order.mallPaymentDueText || "—")}</span><p>請先至 iOPEN Mall 確認並關閉賣場，再由訂單狀態選擇「取消訂單」發送結案卡片。</p></section>`
@@ -230,7 +230,7 @@ function renderAdminOrderCard(order) {
         ${statusDetailRows}
       </dl>
       <div class="order-status-actions">
-        <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="${PAYMENT_REPORTED_STATUS}" ${status === PAYMENT_REPORTED_STATUS ? "selected" : ""} disabled>${PAYMENT_REPORTED_STATUS}（顧客回報）</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
+        <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}>${status === PAYMENT_REPORTED_STATUS ? `<option value="${PAYMENT_REPORTED_STATUS}" selected hidden>${PAYMENT_REPORTED_STATUS}</option>` : ""}<option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
       </div>
       ${lineAlert}
       ${mallExpiry}
@@ -287,23 +287,43 @@ function renderOrderAdjustmentHistory(order, history) {
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-edit-order], [data-reminder-order], [data-mall-reminder-order], [data-refund-order], [data-resolve-line-order]");
+  const button = event.target.closest("[data-edit-order], [data-reminder-order], [data-mall-reminder-order], [data-refund-order], [data-line-decision]");
   if (!button) return;
   if (button.dataset.editOrder) {
     openOrderEditor(button.dataset.editOrder);
     return;
   }
-  if (button.dataset.resolveLineOrder) {
-    if (!window.confirm("確定已核對這位顧客的 LINE 訊息？解除保護後，超過內部寬限時間且仍未確認訂金的訂單，會在下一次排程自動取消。")) return;
+  if (button.dataset.lineDecision) {
+    const decision = button.dataset.lineDecision;
+    const confirmations = {
+      received: "確定已至帳戶核對並收到這筆訂金？確認後會更新訂單狀態並發送收到訂金通知。",
+      cancel_overdue: "確定沒有收到這筆訂金？訂單會立即取消並發送逾期取消通知。",
+    };
+    if (confirmations[decision] && !window.confirm(confirmations[decision])) return;
     button.disabled = true;
     try {
-      const result = await adminPost({ action: "adminResolveLineAlert", orderNo: button.dataset.resolveLineOrder });
+      const result = await adminPost({
+        action: "adminResolveLineAlert",
+        orderNo: button.dataset.lineOrder,
+        decision,
+      });
       if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
       await loadAdminProducts();
-      showToast("LINE 訊息已標記為已核對");
+      const messages = {
+        received: result.order.notificationSent ? "已收到訂金並發送通知" : "已收到訂金，但 LINE 通知未送達",
+        reviewed: "LINE 訊息已標記為已查看",
+        cancel_overdue: result.order.notificationSent ? "訂單已取消並發送通知" : "訂單已取消，但 LINE 通知未送達",
+      };
+      showToast(messages[decision] || "LINE 訊息已處理");
     } catch (error) {
       button.disabled = false;
-      showToast("目前無法解除訊息保護");
+      const messages = {
+        LINE_ALERT_ALREADY_RESOLVED: "這則 LINE 訊息已由其他頁面處理，請重新整理",
+        ORDER_PAYMENT_OVERDUE: "訂單已逾期，請重新整理後選擇逾期取消",
+        ORDER_CANCEL_NOT_DUE: "訂單尚未到自動取消時間",
+        INVALID_ORDER_STATUS: "訂單狀態已改變，請重新整理",
+      };
+      showToast(messages[error.message] || "目前無法處理 LINE 訊息");
     }
     return;
   }

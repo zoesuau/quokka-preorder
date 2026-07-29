@@ -36,12 +36,21 @@
                 <div><dt>訂單金額</dt><dd class="order-accent">NT $2,678</dd></div>
                 <div><dt>訂金金額</dt><dd>NT $1,500</dd></div>
               </dl>
+              <div class="order-status-actions">
+                <label><span>訂單狀態</span><select><option>待收訂金</option><option selected>已收到訂金</option><option>已開設 iOPEN Mall 賣場</option><option>訂單已完成</option><option>取消訂單</option></select></label>
+              </div>
               <section class="line-alert">
                 <strong>LINE 有新訊息待核對</strong>
                 <span>1 則・文字・2026-07-29 15:40:15</span>
                 <p>銀行 App 分享匯款資訊</p>
                 <small>核對前系統不會自動取消這筆訂單。</small>
-                <button type="button">已查看，解除保護</button>
+                <details class="line-alert-menu" open>
+                  <summary>處理 LINE 訊息</summary>
+                  <div class="line-alert-options">
+                    <button type="button">確認已收到訂金</button>
+                    <button class="is-reviewed" type="button">不是付款訊息，標記已查看</button>
+                  </div>
+                </details>
               </section>
               <details class="order-adjustment-history" open>
                 <summary><span>查看調整紀錄（1）</span><b>2026-07-29 14:30:00</b></summary>

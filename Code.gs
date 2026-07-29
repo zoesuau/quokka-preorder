@@ -1161,6 +1161,9 @@ function readAdminOrders_() {
         paymentOverdue:
           status === ORDER_STATUS_PENDING_ &&
           ageHours >= ORDER_PAYMENT_DEADLINE_HOURS_,
+        autoCancelOverdue:
+          status === ORDER_STATUS_PENDING_ &&
+          ageHours >= ORDER_AUTO_CANCEL_HOURS_,
         lineAlertCount: lineAlerts.length,
         latestLineAlert: lineAlerts.length
           ? {
@@ -1216,8 +1219,15 @@ function readUnreviewedLineAlertsByUser_() {
 function handleAdminResolveLineAlert_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var orderNo = String(data.orderNo || "").trim();
+  var decision = String(data.decision || "reviewed").trim();
+  var allowedDecisions = ["received", "reviewed", "cancel_overdue"];
   if (!orderNo) throw new Error("ORDER_NOT_FOUND");
+  if (allowedDecisions.indexOf(decision) < 0)
+    throw new Error("INVALID_LINE_ALERT_DECISION");
   var lock = LockService.getScriptLock();
+  var result;
+  var notificationTarget;
+  var notificationType = "";
   lock.waitLock(10000);
   try {
     setupQuokkaPreorder();
@@ -1227,34 +1237,144 @@ function handleAdminResolveLineAlert_(data) {
     var order = orderSheet
       .getRange(orderRow, 1, 1, ORDER_HEADERS_.length)
       .getDisplayValues()[0];
+    var currentStatus = normalizeOrderStatus_(order[15], order[17]);
     var userId = String(order[2] || "").trim();
     var createdAt = parseOrderDate_(order[1]);
+    var ageHours = createdAt
+      ? (new Date().getTime() - createdAt.getTime()) / 3600000
+      : 0;
     var eventSheet = spreadsheet_().getSheetByName("LineInboundEvents");
     var reviewedAt = formatDateTime_(new Date());
-    var resolved = 0;
+    var eventIndexes = [];
     if (eventSheet && eventSheet.getLastRow() >= 2) {
-      var rows = eventSheet
+      var eventRows = eventSheet
         .getRange(2, 1, eventSheet.getLastRow() - 1, LINE_EVENT_HEADERS_.length)
         .getDisplayValues();
-      rows.forEach(function (row, index) {
+      eventRows.forEach(function (row, index) {
         var receivedAt = parseOrderDate_(row[2]);
         if (
           row[1] === userId &&
           row[7] === "待核對" &&
           (!row[6] || row[6] === orderNo) &&
           (!createdAt || !receivedAt || receivedAt >= createdAt)
-        ) {
-          eventSheet
-            .getRange(index + 2, 7, 1, 3)
-            .setValues([[orderNo, "已核對", reviewedAt]]);
-          resolved += 1;
-        }
+        )
+          eventIndexes.push(index);
       });
     }
-    return json_({ ok: true, orderNo: orderNo, resolved: resolved });
+    var duplicate = false;
+    var targetAlreadyApplied =
+      (decision === "received" &&
+        currentStatus === ORDER_STATUS_DEPOSIT_RECEIVED_) ||
+      (decision === "cancel_overdue" &&
+        currentStatus === ORDER_STATUS_CANCELLED_);
+    if (!eventIndexes.length) {
+      if (decision === "reviewed" || targetAlreadyApplied) duplicate = true;
+      else throw new Error("LINE_ALERT_ALREADY_RESOLVED");
+    }
+    if (decision === "received") {
+      if (
+        [
+          ORDER_STATUS_PENDING_,
+          ORDER_STATUS_PAYMENT_REPORTED_,
+          ORDER_STATUS_DEPOSIT_RECEIVED_,
+        ].indexOf(currentStatus) < 0
+      )
+        throw new Error("INVALID_ORDER_STATUS");
+      duplicate = currentStatus === ORDER_STATUS_DEPOSIT_RECEIVED_;
+      if (!duplicate) {
+        orderSheet
+          .getRange(orderRow, 16)
+          .setValue(ORDER_STATUS_DEPOSIT_RECEIVED_);
+        orderSheet
+          .getRange(orderRow, 18, 1, 2)
+          .setValues([["未開設賣場", ""]]);
+        notificationType = "received";
+      }
+    } else if (decision === "reviewed") {
+      if (
+        [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
+          currentStatus,
+        ) < 0
+      )
+        throw new Error("INVALID_ORDER_STATUS");
+      if (
+        currentStatus === ORDER_STATUS_PENDING_ &&
+        ageHours >= ORDER_AUTO_CANCEL_HOURS_
+      )
+        throw new Error("ORDER_PAYMENT_OVERDUE");
+    } else {
+      if (currentStatus === ORDER_STATUS_CANCELLED_) {
+        duplicate = true;
+      } else {
+        if (currentStatus !== ORDER_STATUS_PENDING_)
+          throw new Error("INVALID_ORDER_STATUS");
+        if (!createdAt || ageHours < ORDER_AUTO_CANCEL_HOURS_)
+          throw new Error("ORDER_CANCEL_NOT_DUE");
+        var cancelledAt = formatDateTime_(new Date());
+        orderSheet.getRange(orderRow, 16).setValue(ORDER_STATUS_CANCELLED_);
+        orderSheet
+          .getRange(orderRow, 18, 1, 2)
+          .setValues([["未開設賣場", ""]]);
+        orderSheet.getRange(orderRow, 21).setValue(cancelledAt);
+        notificationType = "cancelled";
+      }
+    }
+    var resolved = 0;
+    eventIndexes.forEach(function (index) {
+      eventSheet
+        .getRange(index + 2, 7, 1, 3)
+        .setValues([[orderNo, "已核對", reviewedAt]]);
+      resolved += 1;
+    });
+    var nextStatus =
+      decision === "received"
+        ? ORDER_STATUS_DEPOSIT_RECEIVED_
+        : decision === "cancel_overdue"
+          ? ORDER_STATUS_CANCELLED_
+          : currentStatus;
+    result = {
+      orderNo: orderNo,
+      status: nextStatus,
+      shippingStatus: "未開設賣場",
+      shippedAt: "",
+      cancelledAt:
+        nextStatus === ORDER_STATUS_CANCELLED_
+          ? cancelledAt || order[20]
+          : order[20],
+      resolved: resolved,
+      duplicate: duplicate,
+    };
+    notificationTarget = {
+      lineUserId: order[2],
+      orderNo: order[0],
+      createdAt: order[1],
+      customerName: order[4],
+      itemsSummary: order[7],
+      totalQty: number_(order[8]),
+      estimatedTotal: number_(order[9]),
+      depositTotal: number_(order[10]),
+      estimatedBalance: number_(order[11]),
+      reason: "超過訂金付款期限仍未確認收到訂金。",
+    };
   } finally {
     lock.releaseLock();
   }
+  var notificationSent = false;
+  if (notificationType === "received")
+    notificationSent = pushLineMessage_(
+      notificationTarget.lineUserId,
+      buildUnifiedDepositReceivedCard_(notificationTarget),
+      "deposit received " + orderNo,
+    );
+  if (notificationType === "cancelled")
+    notificationSent = pushLineMessage_(
+      notificationTarget.lineUserId,
+      buildUnifiedCancellationCard_(notificationTarget),
+      "order cancellation " + orderNo,
+    );
+  result.notificationAttempted = !!notificationType;
+  result.notificationSent = notificationSent;
+  return json_({ ok: true, order: result });
 }
 
 function handleAdminUpdateOrderStatus_(data) {
@@ -3128,6 +3248,10 @@ function safeError_(error) {
     "INVALID_ORDER_ADJUSTMENT",
     "ORDER_EDIT_NOT_ALLOWED",
     "ORDER_CHANGED",
+    "INVALID_LINE_ALERT_DECISION",
+    "LINE_ALERT_ALREADY_RESOLVED",
+    "ORDER_PAYMENT_OVERDUE",
+    "ORDER_CANCEL_NOT_DUE",
     "NO_ORDER_CHANGES",
     "NO_ITEMS_TO_ADJUST",
     "INVALID_REMINDER",
