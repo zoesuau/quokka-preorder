@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260729-direct-line-actions" />
+    <link rel="stylesheet" href="admin.css?v=20260729-system-settings" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260729-direct-line-actions" defer></script>
+    <script src="admin.js?v=20260729-system-settings" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -46,6 +46,7 @@
       <nav class="admin-page-tabs" aria-label="後台頁面">
         <button class="active" type="button" data-admin-page="orders">訂單管理</button>
         <button type="button" data-admin-page="products">商品管理</button>
+        <button type="button" data-admin-page="settings">系統設定</button>
       </nav>
 
       <section class="admin-page-panel" id="adminOrdersPage">
@@ -79,43 +80,64 @@
         <button class="primary-button" type="button" id="newProduct">＋ 新增商品</button>
       </section>
 
-      <details class="settings-card">
-        <summary>預購設定</summary>
-        <form id="settingsForm">
-          <label class="switch-field sale-closed-switch"><span>前台停賣</span><input id="saleClosed" type="checkbox" /><i></i></label>
-          <label class="field"><span>停賣公告</span><textarea id="saleClosedNotice" rows="3" maxlength="300" placeholder="本次連線已結束，謝謝大家的支持！"></textarea></label>
-          <p class="order-first-note"><strong>訂金規則</strong><br />商品總額的 50%，回國後支付剩餘商品款。</p>
-          <label class="field"><span>前台預購說明</span><textarea id="adminPreorderNotice" rows="3" maxlength="300"></textarea></label>
-          <h3 class="settings-subtitle">匯款帳號</h3>
-          <div class="settings-grid">
-            <label class="field"><span>銀行名稱</span><input id="bankName" maxlength="50" placeholder="例如：連線商業銀行" /></label>
-            <label class="field"><span>銀行代碼</span><input id="bankCode" maxlength="10" inputmode="numeric" placeholder="824" /></label>
-          </div>
-          <label class="field"><span>匯款帳號</span><input id="bankAccount" maxlength="30" inputmode="numeric" placeholder="輸入完整帳號" /></label>
-          <label class="field"><span>戶名</span><input id="bankAccountName" maxlength="50" /></label>
-          <label class="field"><span>匯款補充說明（小卡不顯示）</span><textarea id="bankTransferInfoSetting" rows="2" maxlength="300" placeholder="例如：匯款後請在 LINE 回報後五碼"></textarea></label>
-          <label class="bank-qr-uploader" for="bankQrInput">
-            <img id="bankQrPreview" alt="匯款 QR Code 預覽" />
-            <span id="bankQrHint">上傳匯款 QR Code（小卡不顯示）</span>
-            <input id="bankQrInput" type="file" accept="image/jpeg,image/png,image/webp" />
-          </label>
-          <input id="bankQrUrl" type="hidden" />
-          <div class="upload-progress" id="bankQrProgress" hidden>正在上傳 QR Code…</div>
-          <label class="field"><span>iOPEN Mall 賣場網址（開設賣場後顯示於訂單）</span><input id="iopenMallUrl" type="url" maxlength="500" /></label>
-          <button class="secondary-button" type="submit">儲存預購設定</button>
-        </form>
-      </details>
-
       <div class="admin-toolbar">
         <label class="admin-search">
           <span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></span>
           <input id="productSearch" type="search" aria-label="搜尋商品名稱或分類" placeholder="商品名稱或分類" />
         </label>
-        <select id="statusFilter" aria-label="上架狀態"><option value="all">全部狀態</option><option value="active">上架中</option><option value="inactive">已下架</option></select>
+        <select id="statusFilter" aria-label="上架狀態"><option value="all">全部狀態</option><option value="active">上架中</option><option value="inactive">缺貨</option></select>
       </div>
 
       <div class="status-panel" id="adminStatus">正在確認管理員身分…</div>
       <section class="admin-product-list" id="adminProductList"></section>
+      </section>
+
+      <section class="admin-page-panel" id="adminSettingsPage" hidden>
+        <form id="settingsForm" class="system-settings-form">
+          <section class="settings-section">
+            <div class="settings-section-heading"><p class="eyebrow">STOREFRONT</p><h2>前台顯示</h2></div>
+            <label class="field"><span>前台預購說明</span><textarea id="adminPreorderNotice" rows="4" maxlength="300"></textarea></label>
+            <label class="switch-field sale-closed-switch"><span>前台停賣</span><input id="saleClosed" type="checkbox" /><i></i></label>
+            <label class="field"><span>停賣公告</span><textarea id="saleClosedNotice" rows="3" maxlength="300" placeholder="本次連線已結束，謝謝大家的支持！"></textarea></label>
+            <button class="secondary-button" type="submit" formnovalidate data-settings-section="storefront">儲存前台顯示</button>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-heading"><p class="eyebrow">PRICING</p><h2>共用計價規則</h2></div>
+            <p class="settings-note">只套用於新增商品，或重新修改商品的韓幣售價；不會重算既有商品與訂單。</p>
+            <label class="field"><span>韓幣換算費率</span><input id="exchangeRate" type="number" min="0.000001" max="10" step="0.000001" inputmode="decimal" required /></label>
+            <label class="field"><span>固定加價金額（NT$）</span><input id="fixedMarkupTwd" type="number" min="0" max="1000000" step="1" inputmode="numeric" required /></label>
+            <p class="settings-formula">韓幣售價 × 費率 ＋ 固定金額 ＝ 台幣售價（四捨五入）</p>
+            <button class="secondary-button" type="submit" formnovalidate data-settings-section="pricing">儲存計價規則</button>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-heading"><p class="eyebrow">DEPOSIT</p><h2>訂金與付款規則</h2></div>
+            <p class="settings-note warning">只套用於儲存後成立的新訂單；舊訂單維持成立時的規則。</p>
+            <label class="field"><span>訂金比例（%）</span><input id="depositPercent" type="number" min="1" max="100" step="1" inputmode="numeric" required /></label>
+            <label class="field"><span>訂金提醒起始時間（小時）</span><input id="paymentReminderHours" type="number" min="1" max="720" step="1" inputmode="numeric" required /></label>
+            <label class="field"><span>顧客付款期限（小時）</span><input id="paymentDeadlineHours" type="number" min="2" max="720" step="1" inputmode="numeric" required /></label>
+            <label class="field"><span>內部寬限時間（小時）</span><input id="paymentGraceHours" type="number" min="0" max="168" step="1" inputmode="numeric" required /></label>
+            <p class="settings-formula" id="paymentRulePreview"></p>
+            <button class="secondary-button" type="submit" formnovalidate data-settings-section="deposit">儲存訂金規則</button>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-heading"><p class="eyebrow">IOPEN MALL</p><h2>iOPEN Mall</h2></div>
+            <label class="field"><span>賣場網址</span><input id="iopenMallUrl" type="url" maxlength="500" /></label>
+            <label class="field"><span>賣場付款期限（日）</span><input id="iopenMallPaymentDays" type="number" min="1" max="60" step="1" inputmode="numeric" required /></label>
+            <p class="settings-note">到期前 1 日可由管理員手動提醒；逾期只在後台警示，不會自動取消或自動發送通知。</p>
+            <button class="secondary-button" type="submit" formnovalidate data-settings-section="mall">儲存 iOPEN Mall 設定</button>
+          </section>
+        </form>
+
+        <form id="passwordForm" class="settings-section password-settings-form">
+          <div class="settings-section-heading"><p class="eyebrow">SECURITY</p><h2>後台登入碼</h2></div>
+          <p class="settings-note warning">變更後，所有已登入裝置都會登出，需使用新登入碼重新登入。</p>
+          <label class="field"><span>新管理登入碼</span><input id="newAdminAccessCode" type="password" minlength="6" maxlength="64" autocomplete="new-password" required /></label>
+          <label class="field"><span>再次輸入新登入碼</span><input id="confirmAdminAccessCode" type="password" minlength="6" maxlength="64" autocomplete="new-password" required /></label>
+          <button class="secondary-button" type="submit">變更後台登入碼</button>
+        </form>
       </section>
       </div>
     </main>
@@ -136,18 +158,18 @@
         <div class="upload-progress" id="uploadProgress" hidden>正在壓縮並上傳圖片…</div>
 
         <label class="field"><span>商品名稱 *</span><input id="productName" required maxlength="100" placeholder="例如：矮袋鼠露營鑰匙圈" /></label>
-        <div class="settings-grid">
-          <label class="field"><span>分類 *</span><input id="productCategory" required maxlength="30" list="categorySuggestions" placeholder="吊飾" /></label>
-          <label class="field"><span>台幣售價 *</span><input id="productTwdPrice" required type="number" min="1" step="1" inputmode="numeric" placeholder="例如：350" /></label>
-        </div>
+        <label class="field"><span>分類 *</span><input id="productCategory" required maxlength="30" list="categorySuggestions" placeholder="可選擇既有分類或輸入新分類" /></label>
         <datalist id="categorySuggestions"><option value="吊飾"></option><option value="文具"></option><option value="收納"></option><option value="玩偶"></option><option value="生活小物"></option></datalist>
-        <div class="price-preview">前台販售價格：<strong id="adminTwdPreview">NT$0</strong></div>
-        <label class="field"><span>款式（用逗號或換行分隔）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="QUOKKA, BOBO"></textarea></label>
+        <section class="product-price-calculator">
+          <label class="field"><span>韓幣售價</span><input id="productKrwPrice" type="number" min="0" step="1" inputmode="numeric" placeholder="輸入後自動計算台幣售價" /></label>
+          <div class="calculator-rule"><span>共用費率 <b id="productExchangeRatePreview">—</b></span><span>固定加價 <b id="productFixedMarkupPreview">—</b></span></div>
+          <label class="field"><span>台幣售價 *</span><input id="productTwdPrice" required type="number" min="1" step="1" inputmode="numeric" placeholder="例如：350" /></label>
+          <div class="price-preview">前台販售價格：<strong id="adminTwdPreview">NT$0</strong></div>
+        </section>
+        <label class="field"><span>款式（選填）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="例如：QUOKKA、BOBO（用逗號或換行分隔）"></textarea><small class="field-help">同一商品有多個角色、顏色或尺寸，且售價相同時才填寫；只有一種款式可留白，不同售價或不同販售狀態請分開建立商品。</small></label>
         <label class="field"><span>商品說明</span><textarea id="productDescription" rows="3" maxlength="500" placeholder="尺寸、材質或現場注意事項"></textarea></label>
-        <div class="settings-grid">
-          <label class="field"><span>排序</span><input id="productSortOrder" type="number" step="1" min="0" /></label>
-          <label class="switch-field"><span>立即上架</span><input id="productActive" type="checkbox" checked /><i></i></label>
-        </div>
+        <label class="field"><span>排序</span><input id="productSortOrder" type="number" step="1" min="0" /></label>
+        <label class="field"><span>販售狀態</span><select id="productStatus"><option value="active">上架</option><option value="inactive">缺貨</option></select><small class="field-help">缺貨商品會立即從前台隱藏，但仍保留在後台，可隨時重新上架。</small></label>
         <button class="primary-button" id="saveProduct" type="submit">儲存商品</button>
       </form>
     </dialog>

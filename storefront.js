@@ -2,7 +2,7 @@ const CONFIG = window.QUOKKA_CONFIG || {};
 window.QUOKKA_APP_VERSION = "20260729-orders-first";
 const state = {
   products: [],
-  settings: { preorderNotice: "", bankTransferInfo: "", saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
+  settings: { preorderNotice: "", depositPercent: 50, saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
   catalogReady: false,
   catalogLoadPromise: null,
   category: "全部",
@@ -191,6 +191,9 @@ function renderCatalog() {
     : categoryProducts;
   document.getElementById("productCount").textContent = `${visible.length} 件商品`;
   document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。";
+  const depositPercent = Number(state.settings.depositPercent || 50);
+  document.getElementById("depositRuleLabel").textContent = `本次訂金（商品總額 ${depositPercent}%）`;
+  document.getElementById("preorderAgreementText").textContent = `我了解這是預購商品；下單先付商品總額的 ${depositPercent}% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。`;
   const grid = document.getElementById("productGrid");
   grid.innerHTML = visible.map((product) => {
     return `<article class="product-card" data-product-id="${escapeAttr(product.id)}">
@@ -290,7 +293,7 @@ function getTotals() {
 }
 
 function calculateDeposit(amount) {
-  return Math.ceil(Number(amount || 0) * 0.5);
+  return Math.ceil(Number(amount || 0) * Number(state.settings.depositPercent || 50) / 100);
 }
 
 function openCheckout() {

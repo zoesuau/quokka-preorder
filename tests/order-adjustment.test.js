@@ -182,6 +182,80 @@ test("待收訂金會依新總額重算 50% 訂金", () => {
   assert.equal(row[33], 1);
 });
 
+test("待收訂金調整會沿用訂單成立時的訂金比例", () => {
+  const { context, row } = createHarness("待收訂金", { 34: 30 });
+  context.handleAdminAdjustOrder_(
+    request(
+      [
+        { productId: "p1", variant: "紅", qty: 1 },
+        { productId: "p2", variant: "", qty: 1 },
+      ],
+      { expectedStatus: "待收訂金" },
+    ),
+  );
+  assert.equal(row[9], 175);
+  assert.equal(row[10], 53);
+  assert.equal(row[11], 122);
+});
+
+test("新訂單會保存成立當時的訂金與付款期限規則", () => {
+  const context = { console };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync("Code.gs", "utf8"), context);
+  let appendedRow;
+  context.verifyLineIdToken_ = () => ({ sub: "U123", name: "Zoe" });
+  context.LockService = {
+    getScriptLock: () => ({ waitLock() {}, releaseLock() {} }),
+  };
+  context.setupQuokkaPreorder = () => {};
+  context.readSettings_ = () => ({
+    saleClosed: false,
+    depositPercent: 30,
+    paymentReminderHours: 10,
+    paymentDeadlineHours: 20,
+    paymentGraceHours: 2,
+  });
+  context.readProducts_ = () => [
+    {
+      id: "p1",
+      name: "商品 A",
+      priceTwd: 200,
+      variants: [],
+      active: true,
+    },
+  ];
+  context.spreadsheet_ = () => ({
+    getSheetByName: () => ({
+      appendRow(row) {
+        appendedRow = row;
+      },
+    }),
+  });
+  context.Utilities = {
+    getUuid: () => "12345678901234567890",
+  };
+  context.formatDateTime_ = (date) => String(date.getTime());
+  context.pushOrderSuccessCard_ = () => false;
+  context.json_ = (payload) => payload;
+  context.createOrderNo_ = () => "QK-NEW";
+
+  const result = context.handleCreatePreorder_({
+    idToken: "token",
+    lineDisplayName: "Zoe",
+    customerName: "Zoe",
+    phone: "0900000000",
+    items: [{ productId: "p1", variant: "", qty: 1 }],
+  });
+
+  assert.equal(result.depositTotal, 60);
+  assert.equal(result.estimatedBalance, 140);
+  assert.equal(appendedRow.length, context.ORDER_HEADERS_.length);
+  assert.equal(appendedRow[34], 30);
+  assert.notEqual(appendedRow[35], "");
+  assert.notEqual(appendedRow[36], "");
+  assert.notEqual(appendedRow[37], "");
+});
+
 test("待確認訂金保留原訂金與狀態", () => {
   const { context, row } = createHarness("待確認訂金");
   const result = context.handleAdminAdjustOrder_(

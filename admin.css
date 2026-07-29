@@ -4,7 +4,7 @@
 .admin-header .eyebrow { color: var(--butter); }
 .admin-refresh { padding: 8px 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 10px; background: transparent; color: white; font-size: .78rem; }
 .admin-main { width: min(100%, 760px); margin: auto; padding: 16px 14px 80px; }
-.admin-page-tabs { position: sticky; top: 64px; z-index: 15; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: -2px 0 14px; padding: 5px; border: 1px solid rgba(255,255,255,.75); border-radius: 15px; background: rgba(247,251,252,.94); box-shadow: 0 5px 18px rgba(38,76,96,.12); backdrop-filter: blur(12px); }
+.admin-page-tabs { position: sticky; top: 64px; z-index: 15; display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin: -2px 0 14px; padding: 5px; border: 1px solid rgba(255,255,255,.75); border-radius: 15px; background: rgba(247,251,252,.94); box-shadow: 0 5px 18px rgba(38,76,96,.12); backdrop-filter: blur(12px); }
 .admin-page-tabs button { padding: 11px 8px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); font-weight: 700; }
 .admin-page-tabs button.active { background: #47748e; color: white; box-shadow: 0 4px 12px rgba(71,116,142,.25); }
 .admin-page-panel { animation: admin-page-in .18s ease-out; }
@@ -133,6 +133,20 @@
 .settings-card form { padding-bottom: 15px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .settings-subtitle { margin: 18px 0 8px; font-size: .9rem; }
+.system-settings-form { display: grid; gap: 14px; }
+.settings-section { margin: 0; padding: 17px; border: 1px solid rgba(255,255,255,.65); border-radius: 18px; background: var(--paper); box-shadow: 0 7px 22px rgba(38,76,96,.1); }
+.settings-section-heading { margin-bottom: 13px; }
+.settings-section-heading h2 { margin: 2px 0 0; font-size: 1.05rem; }
+.settings-note { margin: -3px 0 13px; color: var(--muted); font-size: .72rem; line-height: 1.6; }
+.settings-note.warning { padding: 9px 10px; border-left: 4px solid #e6b900; border-radius: 7px; background: #fff7da; color: #62531e; }
+.settings-formula { margin: 8px 0 0; padding: 10px 12px; border-radius: 11px; background: #e7f1f5; color: #47748e; font-size: .74rem; font-weight: 700; line-height: 1.55; }
+.settings-save-button { position: sticky; bottom: 14px; z-index: 4; box-shadow: 0 8px 22px rgba(38,76,96,.25); }
+.password-settings-form { margin-top: 14px; }
+.product-price-calculator { display: grid; gap: 0; margin: 12px 0; padding: 13px; border: 1px solid #b9d3df; border-radius: 14px; background: #f2f8fa; }
+.calculator-rule { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 7px 14px; margin: -2px 0 10px; color: var(--muted); font-size: .69rem; }
+.calculator-rule b { color: #47748e; }
+.field-help { display: block; margin-top: 6px; color: var(--muted); font-size: .68rem; font-weight: 500; line-height: 1.55; }
+.field select { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: white; color: var(--ink); font: inherit; }
 .bank-qr-uploader { position: relative; display: grid; overflow: hidden; width: 180px; height: 180px; margin: 10px auto; place-items: center; border: 2px dashed #86aabd; border-radius: 16px; background: #edf5f8; cursor: pointer; }
 .bank-qr-uploader img { position: absolute; width: 100%; height: 100%; object-fit: contain; }
 .bank-qr-uploader span { z-index: 1; padding: 7px 10px; border-radius: 999px; background: rgba(255,255,255,.92); color: var(--muted); font-size: .68rem; font-weight: 700; text-align: center; }

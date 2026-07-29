@@ -58,6 +58,12 @@ var ORDER_HEADERS_ = [
   "orderAdjustedAt",
   "orderAdjustmentNotificationSentAt",
   "orderRevision",
+  "depositPercent",
+  "paymentReminderAt",
+  "paymentDeadlineAt",
+  "paymentAutoCancelAt",
+  "iopenMallPaymentDays",
+  "iopenMallPaymentDeadlineAt",
 ];
 
 var ORDER_STATUS_PENDING_ = "待收訂金";
@@ -87,6 +93,12 @@ var LINE_EVENT_HEADERS_ = [
 var SETTING_HEADERS_ = ["key", "value", "label"];
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
+  fixedMarkupTwd: 0,
+  depositPercent: 50,
+  paymentReminderHours: 12,
+  paymentDeadlineHours: 24,
+  paymentGraceHours: 1,
+  iopenMallPaymentDays: 8,
   preorderNotice:
     "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。",
   saleClosed: false,
@@ -137,6 +149,8 @@ function doPost(e) {
     if (action === "adminUploadProductImage")
       return handleAdminUploadProductImage_(data);
     if (action === "adminSaveSettings") return handleAdminSaveSettings_(data);
+    if (action === "adminChangeAccessCode")
+      return handleAdminChangeAccessCode_(data);
 
     return json_({ ok: false, error: "UNSUPPORTED_ACTION" });
   } catch (error) {
@@ -149,12 +163,35 @@ function handleAdminLogin_(data) {
   var expectedCode =
     PropertiesService.getScriptProperties().getProperty("ADMIN_ACCESS_CODE") ||
     "";
+  var expectedHash =
+    PropertiesService.getScriptProperties().getProperty(
+      "ADMIN_ACCESS_CODE_HASH",
+    ) || "";
+  var accessCodeSalt =
+    PropertiesService.getScriptProperties().getProperty(
+      "ADMIN_ACCESS_CODE_SALT",
+    ) || "";
   var providedCode = String((data && data.accessCode) || "").trim();
-  if (!expectedCode) throw new Error("ADMIN_ACCESS_CODE_MISSING");
-  if (!providedCode || providedCode !== expectedCode)
+  if (!expectedCode && (!expectedHash || !accessCodeSalt))
+    throw new Error("ADMIN_ACCESS_CODE_MISSING");
+  var loginMatches =
+    providedCode &&
+    ((expectedHash &&
+      accessCodeSalt &&
+      hashAccessCode_(providedCode, accessCodeSalt) === expectedHash) ||
+      (expectedCode && providedCode === expectedCode));
+  if (!loginMatches)
     throw new Error("ADMIN_LOGIN_FAILED");
   var token = Utilities.getUuid() + Utilities.getUuid();
-  CacheService.getScriptCache().put("admin-session-" + token, "1", 21600);
+  var sessionVersion =
+    PropertiesService.getScriptProperties().getProperty(
+      "ADMIN_SESSION_VERSION",
+    ) || "1";
+  CacheService.getScriptCache().put(
+    "admin-session-" + token,
+    sessionVersion,
+    21600,
+  );
   return json_({ ok: true, adminSessionToken: token, expiresIn: 21600 });
 }
 
@@ -173,7 +210,17 @@ function handleReadPublicCatalog_() {
     var products = readProducts_().filter(function (product) {
       return product.active === true;
     });
-    return json_({ ok: true, products: products, settings: readSettings_() });
+    var settings = readSettings_();
+    return json_({
+      ok: true,
+      products: products,
+      settings: {
+        preorderNotice: settings.preorderNotice,
+        saleClosed: settings.saleClosed,
+        saleClosedNotice: settings.saleClosedNotice,
+        depositPercent: settings.depositPercent,
+      },
+    });
   } catch (error) {
     console.error(error);
     return json_({ ok: false, error: "CATALOG_UNAVAILABLE" });
@@ -230,7 +277,9 @@ function handleCreatePreorder_(data) {
     });
 
     if (!cleanItems.length || totalQty > 100) throw new Error("INVALID_ITEMS");
-    var depositTotal = Math.ceil(estimatedTotal * 0.5);
+    var depositTotal = Math.ceil(
+      estimatedTotal * (settings.depositPercent / 100),
+    );
     var estimatedBalance = estimatedTotal - depositTotal;
     var now = new Date();
     var orderNo = createOrderNo_(now);
@@ -269,6 +318,35 @@ function handleCreatePreorder_(data) {
       "",
       "",
       "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      settings.depositPercent,
+      formatDateTime_(
+        new Date(now.getTime() + settings.paymentReminderHours * 3600000),
+      ),
+      formatDateTime_(
+        new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
+      ),
+      formatDateTime_(
+        new Date(
+          now.getTime() +
+            (settings.paymentDeadlineHours + settings.paymentGraceHours) *
+              3600000,
+        ),
+      ),
+      "",
+      "",
     ]);
     orderResult = {
       orderNo: orderNo,
@@ -280,6 +358,10 @@ function handleCreatePreorder_(data) {
       estimatedTotal: estimatedTotal,
       depositTotal: depositTotal,
       estimatedBalance: estimatedBalance,
+      depositPercent: settings.depositPercent,
+      paymentDeadlineAt: formatDateTime_(
+        new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
+      ),
     };
   } finally {
     lock.releaseLock();
@@ -424,7 +506,9 @@ function buildOrderSuccessMessage_(order) {
     moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
     moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
     moneyRow_(
-      "本次訂金（50%）",
+      "本次訂金（" +
+        number_(order.depositPercent || DEFAULT_SETTINGS_.depositPercent) +
+        "%）",
       "NT$" + formatMoney_(order.depositTotal),
       "#EF0025",
     ),
@@ -657,8 +741,9 @@ function buildUnifiedOrderCard_(order, title, message, options) {
 }
 
 function buildUnifiedOrderSuccessCard_(order) {
-  var paymentDue = parseOrderDate_(order.createdAt);
-  if (paymentDue)
+  var paymentDue = parseOrderDate_(order.paymentDeadlineAt);
+  if (!paymentDue) paymentDue = parseOrderDate_(order.createdAt);
+  if (paymentDue && !order.paymentDeadlineAt)
     paymentDue = new Date(
       paymentDue.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
     );
@@ -667,10 +752,13 @@ function buildUnifiedOrderSuccessCard_(order) {
     order,
     "已收到預購訂單",
     "請於 " +
-      (paymentDue ? formatDateTime_(paymentDue) : "訂單成立後 24 小時內") +
+      (paymentDue ? formatDateTime_(paymentDue) : "正式付款期限") +
       " 前完成匯款並回傳帳號後五碼。",
     {
-      depositLabel: "本次訂金（50%）",
+      depositLabel:
+        "本次訂金（" +
+        number_(order.depositPercent || DEFAULT_SETTINGS_.depositPercent) +
+        "%）",
       balanceLabel: "回國後剩餘商品款",
       buttons: [
         {
@@ -684,8 +772,10 @@ function buildUnifiedOrderSuccessCard_(order) {
 }
 
 function buildUnifiedPendingCard_(order) {
+  var dueAt = parseOrderDate_(order.paymentDeadlineAt);
   var createdAt = parseOrderDate_(order.createdAt);
-  var dueAt = createdAt
+  if (!dueAt)
+    dueAt = createdAt
     ? new Date(
         createdAt.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
       )
@@ -694,7 +784,7 @@ function buildUnifiedPendingCard_(order) {
     order,
     "待收訂金",
     "請於 " +
-      (dueAt ? formatDateTime_(dueAt) : "訂單成立後 24 小時內") +
+      (dueAt ? formatDateTime_(dueAt) : "正式付款期限") +
       " 前完成匯款並回傳帳號後五碼。",
     { depositLabel: "應付訂金", balanceLabel: "回國後剩餘商品款" },
   );
@@ -710,7 +800,11 @@ function buildUnifiedDepositReceivedCard_(order) {
 }
 
 function buildUnifiedMallReadyCard_(order, iopenMallUrl) {
-  var mallDeadline = buildMallPaymentDeadline_(order.shippedAt);
+  var mallDeadline = buildMallPaymentDeadline_(
+    order.shippedAt,
+    order.iopenMallPaymentDeadlineAt,
+    order.iopenMallPaymentDays,
+  );
   return buildUnifiedOrderCard_(
     order,
     "已開設 iOPEN Mall 賣場",
@@ -763,7 +857,11 @@ function buildUnifiedCancellationCard_(order) {
 function buildAdjustmentMoneyRows_(order) {
   var receivedDeposit = number_(order.receivedDeposit);
   var adjustedTotal = number_(order.adjustedTotal);
-  var adjustedOrderDeposit = Math.ceil(adjustedTotal * 0.5);
+  var adjustedOrderDeposit = Math.ceil(
+    adjustedTotal *
+      (number_(order.depositPercent || DEFAULT_SETTINGS_.depositPercent) /
+        100),
+  );
   var originalOrderTotal =
     order.originalOrderTotal !== undefined
       ? number_(order.originalOrderTotal)
@@ -887,14 +985,15 @@ function buildUnifiedOrderAdjustmentCard_(order) {
     status +
     "」。";
   if (status === ORDER_STATUS_PENDING_) {
-    var dueAt = parseOrderDate_(order.createdAt);
-    if (dueAt)
+    var dueAt = parseOrderDate_(order.paymentDeadlineAt);
+    if (!dueAt) dueAt = parseOrderDate_(order.createdAt);
+    if (dueAt && !order.paymentDeadlineAt)
       dueAt = new Date(
         dueAt.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
       );
     message +=
       "\n付款期限仍為 " +
-      (dueAt ? formatDateTime_(dueAt) : "原訂單成立後 24 小時") +
+      (dueAt ? formatDateTime_(dueAt) : "原訂單正式付款期限") +
       "，不會因本次修改延長。";
   } else if (status === ORDER_STATUS_PAYMENT_REPORTED_) {
     message += "\n您回報的匯款資料仍保留，將由管理員核帳確認。";
@@ -996,7 +1095,7 @@ function handleReadMyPreorders_(data) {
     var status = normalizeOrderStatus_(row[15], row[17]);
     var mallDeadline =
       status === ORDER_STATUS_SHIPPED_
-        ? buildMallPaymentDeadline_(row[18])
+        ? buildMallPaymentDeadline_(row[18], row[39], number_(row[38]))
         : null;
     orders.push({
       orderNo: row[0],
@@ -1004,6 +1103,7 @@ function handleReadMyPreorders_(data) {
       itemsSummary: row[7],
       estimatedTotal: number_(row[9]),
       depositTotal: number_(row[10]),
+      depositPercent: number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
       estimatedBalance: number_(row[11]),
       originalEstimatedTotal: number_(row[23]) || number_(row[9]),
       shortageAdjustedAt: row[25],
@@ -1019,6 +1119,9 @@ function handleReadMyPreorders_(data) {
         mallDeadline && !mallDeadline.expired ? settings.iopenMallUrl : "",
       mallPaymentDueText: mallDeadline ? mallDeadline.display : "",
       mallPaymentExpired: mallDeadline ? mallDeadline.expired : false,
+      iopenMallPaymentDays:
+        number_(row[38]) || DEFAULT_SETTINGS_.iopenMallPaymentDays,
+      iopenMallPaymentDeadlineAt: row[39],
     });
   }
   return json_({ ok: true, orders: orders });
@@ -1057,15 +1160,11 @@ function readAdminOrders_() {
       }
       var createdAt = parseOrderDate_(row[1]);
       var status = normalizeOrderStatus_(row[15], row[17]);
-      var ageHours = createdAt
-        ? (now.getTime() - createdAt.getTime()) / 3600000
-        : 0;
-      var expiresAt = createdAt
-        ? new Date(createdAt.getTime() + ORDER_EXPIRES_DISPLAY_HOURS_ * 3600000)
-        : null;
+      var paymentSchedule = getOrderPaymentSchedule_(row);
+      var expiresAt = paymentSchedule ? paymentSchedule.dueAt : null;
       var mallDeadline =
         status === ORDER_STATUS_SHIPPED_
-          ? buildMallPaymentDeadline_(row[18])
+          ? buildMallPaymentDeadline_(row[18], row[39], number_(row[38]))
           : null;
       var lineAlerts =
         status === ORDER_STATUS_PENDING_
@@ -1091,7 +1190,10 @@ function readAdminOrders_() {
         totalQty: number_(row[8]),
         estimatedTotal: number_(row[9]),
         depositTotal: number_(row[10]),
+        depositPercent:
+          number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
         estimatedBalance: number_(row[11]),
+        paymentDeadlineAt: row[36],
         paymentMethod: row[12],
         transferLast5: row[13],
         note: row[14],
@@ -1118,20 +1220,20 @@ function readAdminOrders_() {
         orderAdjustedAt: row[31],
         orderAdjustmentNotificationSentAt: row[32],
         orderRevision: number_(row[33]),
-        paymentDueText: createdAt
-          ? formatDateTime_(
-              new Date(
-                createdAt.getTime() +
-                  ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
-              ),
-            )
+        depositPercent: paymentSchedule
+          ? paymentSchedule.depositPercent
+          : DEFAULT_SETTINGS_.depositPercent,
+        paymentDueText: paymentSchedule
+          ? formatDateTime_(paymentSchedule.dueAt)
           : "",
         paymentOverdue:
           status === ORDER_STATUS_PENDING_ &&
-          ageHours >= ORDER_PAYMENT_DEADLINE_HOURS_,
+          !!paymentSchedule &&
+          now.getTime() >= paymentSchedule.dueAt.getTime(),
         autoCancelOverdue:
           status === ORDER_STATUS_PENDING_ &&
-          ageHours >= ORDER_AUTO_CANCEL_HOURS_,
+          !!paymentSchedule &&
+          now.getTime() >= paymentSchedule.autoCancelAt.getTime(),
         lineAlertCount: lineAlerts.length,
         latestLineAlert: lineAlerts.length
           ? {
@@ -1142,8 +1244,9 @@ function readAdminOrders_() {
           : null,
         reminderDue:
           status === ORDER_STATUS_PENDING_ &&
-          ageHours >= ORDER_REMINDER_HOURS_ &&
-          ageHours < ORDER_PAYMENT_DEADLINE_HOURS_ &&
+          !!paymentSchedule &&
+          now.getTime() >= paymentSchedule.reminderAt.getTime() &&
+          now.getTime() < paymentSchedule.dueAt.getTime() &&
           !String(row[19] || "").trim(),
         reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : "",
         mallReminderDue:
@@ -1155,6 +1258,9 @@ function readAdminOrders_() {
           : "",
         mallPaymentDueText: mallDeadline ? mallDeadline.display : "",
         mallPaymentExpired: mallDeadline ? mallDeadline.expired : false,
+        iopenMallPaymentDays:
+          number_(row[38]) || DEFAULT_SETTINGS_.iopenMallPaymentDays,
+        iopenMallPaymentDeadlineAt: row[39],
       };
     })
     .reverse()
@@ -1208,9 +1314,7 @@ function handleAdminResolveLineAlert_(data) {
     var currentStatus = normalizeOrderStatus_(order[15], order[17]);
     var userId = String(order[2] || "").trim();
     var createdAt = parseOrderDate_(order[1]);
-    var ageHours = createdAt
-      ? (new Date().getTime() - createdAt.getTime()) / 3600000
-      : 0;
+    var paymentSchedule = getOrderPaymentSchedule_(order);
     var eventSheet = spreadsheet_().getSheetByName("LineInboundEvents");
     var reviewedAt = formatDateTime_(new Date());
     var eventIndexes = [];
@@ -1267,7 +1371,8 @@ function handleAdminResolveLineAlert_(data) {
         throw new Error("INVALID_ORDER_STATUS");
       if (
         currentStatus === ORDER_STATUS_PENDING_ &&
-        ageHours >= ORDER_AUTO_CANCEL_HOURS_
+        paymentSchedule &&
+        new Date().getTime() >= paymentSchedule.autoCancelAt.getTime()
       )
         throw new Error("ORDER_PAYMENT_OVERDUE");
     } else {
@@ -1276,7 +1381,10 @@ function handleAdminResolveLineAlert_(data) {
       } else {
         if (currentStatus !== ORDER_STATUS_PENDING_)
           throw new Error("INVALID_ORDER_STATUS");
-        if (!createdAt || ageHours < ORDER_AUTO_CANCEL_HOURS_)
+        if (
+          !paymentSchedule ||
+          new Date().getTime() < paymentSchedule.autoCancelAt.getTime()
+        )
           throw new Error("ORDER_CANCEL_NOT_DUE");
         var cancelledAt = formatDateTime_(new Date());
         orderSheet.getRange(orderRow, 16).setValue(ORDER_STATUS_CANCELLED_);
@@ -1391,15 +1499,33 @@ function handleAdminUpdateOrderStatus_(data) {
           : status === ORDER_STATUS_COMPLETED_
             ? row[18]
             : "";
+      var mallPaymentDays = number_(row[38]);
+      var mallPaymentDeadlineAt = row[39];
+      if (
+        status === ORDER_STATUS_SHIPPED_ &&
+        previousStatus !== ORDER_STATUS_SHIPPED_
+      ) {
+        var currentSettings = readSettings_();
+        mallPaymentDays = currentSettings.iopenMallPaymentDays;
+        mallPaymentDeadlineAt = formatDateTime_(
+          calculateMallPaymentDeadlineAt_(shippedAt, mallPaymentDays),
+        );
+      }
       sheet.getRange(rowNumber, 16).setValue(status);
       sheet
         .getRange(rowNumber, 18, 1, 2)
         .setValues([[shippingStatus, shippedAt]]);
+      if (status === ORDER_STATUS_SHIPPED_)
+        sheet
+          .getRange(rowNumber, 39, 1, 2)
+          .setValues([[mallPaymentDays, mallPaymentDeadlineAt]]);
       orderResult = {
         orderNo: orderNo,
         status: status,
         shippingStatus: shippingStatus,
         shippedAt: shippedAt,
+        iopenMallPaymentDays: mallPaymentDays,
+        iopenMallPaymentDeadlineAt: mallPaymentDeadlineAt,
         reminderDue: false,
       };
       notificationTarget = {
@@ -1411,8 +1537,13 @@ function handleAdminUpdateOrderStatus_(data) {
         totalQty: number_(row[8]),
         estimatedTotal: number_(row[9]),
         depositTotal: number_(row[10]),
+        depositPercent:
+          number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
         estimatedBalance: number_(row[11]),
+        paymentDeadlineAt: row[36],
         shippedAt: shippedAt,
+        iopenMallPaymentDays: mallPaymentDays,
+        iopenMallPaymentDeadlineAt: mallPaymentDeadlineAt,
       };
       break;
     }
@@ -1518,7 +1649,11 @@ function buildDepositReceivedMessage_(order) {
 }
 
 function buildIopenMallReadyMessage_(order, iopenMallUrl) {
-  var mallDeadline = buildMallPaymentDeadline_(order.shippedAt);
+  var mallDeadline = buildMallPaymentDeadline_(
+    order.shippedAt,
+    order.iopenMallPaymentDeadlineAt,
+    order.iopenMallPaymentDays,
+  );
   var paymentDeadlineText = mallDeadline ? mallDeadline.display : "賣場開設後第七日 24:00";
   return {
     type: "flex",
@@ -1791,11 +1926,15 @@ function handleAdminAdjustOrder_(data) {
     var previousTotal = number_(row[9]);
     var previousDeposit = number_(row[10]);
     var previousBalance = number_(row[11]);
+    var orderDepositRate =
+      (number_(row[34]) || DEFAULT_SETTINGS_.depositPercent) / 100;
     var adjustedDeposit =
       status === ORDER_STATUS_PENDING_
-        ? Math.ceil(adjustedTotal * 0.5)
+        ? Math.ceil(adjustedTotal * orderDepositRate)
         : previousDeposit;
-    var adjustedOrderDeposit = Math.ceil(adjustedTotal * 0.5);
+    var adjustedOrderDeposit = Math.ceil(
+      adjustedTotal * orderDepositRate,
+    );
     var receivedDeposit =
       status === ORDER_STATUS_PENDING_ ? 0 : previousDeposit;
     var adjustedBalance = Math.max(adjustedTotal - adjustedDeposit, 0);
@@ -1853,7 +1992,10 @@ function handleAdminAdjustOrder_(data) {
       totalQty: totalQty,
       estimatedTotal: adjustedTotal,
       depositTotal: adjustedDeposit,
+      depositPercent:
+        number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
       estimatedBalance: adjustedBalance,
+      paymentDeadlineAt: row[36],
       status: status,
       cashRefundDue:
         status === ORDER_STATUS_DEPOSIT_RECEIVED_
@@ -1872,7 +2014,10 @@ function handleAdminAdjustOrder_(data) {
       totalQty: totalQty,
       estimatedTotal: adjustedTotal,
       depositTotal: adjustedDeposit,
+      depositPercent:
+        number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
       estimatedBalance: adjustedBalance,
+      paymentDeadlineAt: row[36],
       status: status,
       previousTotal: previousTotal,
       adjustedTotal: adjustedTotal,
@@ -2150,7 +2295,12 @@ function handleAdminAdjustOrderShortage_(data) {
       cancelledAmount: cancelledAmount,
       adjustedTotal: adjustedTotal,
       depositTotal: depositTotal,
-      adjustedOrderDeposit: Math.ceil(adjustedTotal * 0.5),
+      adjustedOrderDeposit: Math.ceil(
+        adjustedTotal *
+          ((number_(row[34]) || DEFAULT_SETTINGS_.depositPercent) / 100),
+      ),
+      depositPercent:
+        number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
       receivedDeposit: depositTotal,
       adjustedBalance: adjustedBalance,
       estimatedBalance: adjustedBalance,
@@ -2286,14 +2436,11 @@ function handleAdminSendOrderReminder_(data) {
       .getDisplayValues()[0];
     if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_)
       throw new Error("INVALID_ORDER_STATUS");
-    var createdAt = parseOrderDate_(row[1]);
-    var ageMilliseconds = createdAt
-      ? new Date().getTime() - createdAt.getTime()
-      : 0;
+    var paymentSchedule = getOrderPaymentSchedule_(row);
     if (
-      !createdAt ||
-      ageMilliseconds < ORDER_REMINDER_HOURS_ * 3600000 ||
-      ageMilliseconds >= ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000
+      !paymentSchedule ||
+      new Date().getTime() < paymentSchedule.reminderAt.getTime() ||
+      new Date().getTime() >= paymentSchedule.dueAt.getTime()
     )
       throw new Error("REMINDER_NOT_DUE");
     target = {
@@ -2355,7 +2502,11 @@ function handleAdminSendMallExpiryReminder_(data) {
       .getDisplayValues()[0];
     if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_SHIPPED_)
       throw new Error("INVALID_ORDER_STATUS");
-    var mallDeadline = buildMallPaymentDeadline_(row[18]);
+    var mallDeadline = buildMallPaymentDeadline_(
+      row[18],
+      row[39],
+      number_(row[38]),
+    );
     if (
       !mallDeadline ||
       !mallDeadline.reminderDue ||
@@ -2427,6 +2578,7 @@ function processExpiredPreorders() {
   var expiredOrderNos = [];
   rows.forEach(function (row) {
     var createdAt = parseOrderDate_(row[1]);
+    var paymentSchedule = getOrderPaymentSchedule_(row);
     if (
       !createdAt ||
       normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_
@@ -2441,8 +2593,8 @@ function processExpiredPreorders() {
     });
     if (hasPendingAlert) return;
     if (
-      now.getTime() - createdAt.getTime() >=
-      ORDER_AUTO_CANCEL_HOURS_ * 3600000
+      paymentSchedule &&
+      now.getTime() >= paymentSchedule.autoCancelAt.getTime()
     )
       expiredOrderNos.push(String(row[0] || "").trim());
   });
@@ -2647,9 +2799,26 @@ function parseOrderDate_(value) {
   }
 }
 
-function buildMallPaymentDeadline_(shippedAt) {
+function getOrderPaymentSchedule_(row) {
+  var createdAt = parseOrderDate_(row[1]);
+  if (!createdAt) return null;
+  return {
+    reminderAt:
+      parseOrderDate_(row[35]) ||
+      new Date(createdAt.getTime() + ORDER_REMINDER_HOURS_ * 3600000),
+    dueAt:
+      parseOrderDate_(row[36]) ||
+      new Date(createdAt.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000),
+    autoCancelAt:
+      parseOrderDate_(row[37]) ||
+      new Date(createdAt.getTime() + ORDER_AUTO_CANCEL_HOURS_ * 3600000),
+    depositPercent: number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
+  };
+}
+
+function calculateMallPaymentDeadlineAt_(shippedAt, paymentDays) {
   var openedAt = parseOrderDate_(shippedAt);
-  if (!openedAt) return null;
+  if (!openedAt) return "";
   var timezone = Session.getScriptTimeZone();
   var openedDate = Utilities.formatDate(openedAt, timezone, "yyyy-MM-dd");
   var openedDayStart = Utilities.parseDate(
@@ -2657,7 +2826,25 @@ function buildMallPaymentDeadline_(shippedAt) {
     timezone,
     "yyyy-MM-dd HH:mm:ss",
   );
-  var deadline = new Date(openedDayStart.getTime() + 8 * 24 * 60 * 60 * 1000);
+  return new Date(
+    openedDayStart.getTime() +
+      Number(paymentDays || DEFAULT_SETTINGS_.iopenMallPaymentDays) *
+        24 *
+        60 *
+        60 *
+        1000,
+  );
+}
+
+function buildMallPaymentDeadline_(shippedAt, storedDeadlineAt, paymentDays) {
+  var deadline =
+    parseOrderDate_(storedDeadlineAt) ||
+    calculateMallPaymentDeadlineAt_(
+      shippedAt,
+      paymentDays || DEFAULT_SETTINGS_.iopenMallPaymentDays,
+    );
+  if (!deadline) return null;
+  var timezone = Session.getScriptTimeZone();
   var displayDate = new Date(deadline.getTime() - 1000);
   return {
     display: Utilities.formatDate(displayDate, timezone, "yyyy/MM/dd") + " 24:00",
@@ -2760,7 +2947,7 @@ function handleAdminSaveProduct_(data) {
       product.name,
       product.category,
       product.imageUrl,
-      "",
+      product.krwPrice || "",
       product.variants.join("\n"),
       product.description,
       product.active ? "上架" : "下架",
@@ -2840,21 +3027,72 @@ function handleAdminSaveSettings_(data) {
   var source = data.settings || {};
   var currentSettings = readSettings_();
   var settings = {
-    exchangeRate: currentSettings.exchangeRate,
-    preorderNotice: cleanText_(source.preorderNotice, 300),
-    saleClosed: source.saleClosed === true,
+    exchangeRate:
+      source.exchangeRate === undefined
+        ? currentSettings.exchangeRate
+        : Number(source.exchangeRate),
+    fixedMarkupTwd:
+      source.fixedMarkupTwd === undefined
+        ? currentSettings.fixedMarkupTwd
+        : Number(source.fixedMarkupTwd),
+    depositPercent:
+      source.depositPercent === undefined
+        ? currentSettings.depositPercent
+        : Number(source.depositPercent),
+    paymentReminderHours:
+      source.paymentReminderHours === undefined
+        ? currentSettings.paymentReminderHours
+        : Number(source.paymentReminderHours),
+    paymentDeadlineHours:
+      source.paymentDeadlineHours === undefined
+        ? currentSettings.paymentDeadlineHours
+        : Number(source.paymentDeadlineHours),
+    paymentGraceHours:
+      source.paymentGraceHours === undefined
+        ? currentSettings.paymentGraceHours
+        : Number(source.paymentGraceHours),
+    iopenMallPaymentDays:
+      source.iopenMallPaymentDays === undefined
+        ? currentSettings.iopenMallPaymentDays
+        : Number(source.iopenMallPaymentDays),
+    preorderNotice:
+      source.preorderNotice === undefined
+        ? currentSettings.preorderNotice
+        : cleanText_(source.preorderNotice, 300),
+    saleClosed:
+      source.saleClosed === undefined
+        ? currentSettings.saleClosed
+        : source.saleClosed === true,
     saleClosedNotice:
-      cleanText_(source.saleClosedNotice, 300) ||
-      DEFAULT_SETTINGS_.saleClosedNotice,
-    bankTransferInfo: cleanText_(source.bankTransferInfo, 300),
-    bankName: cleanText_(source.bankName, 50),
-    bankCode: cleanText_(source.bankCode, 10),
-    bankAccount: cleanText_(source.bankAccount, 30),
-    bankAccountName: cleanText_(source.bankAccountName, 50),
-    bankQrUrl: cleanText_(source.bankQrUrl, 500),
-    iopenMallUrl: cleanText_(source.iopenMallUrl, 500),
+      source.saleClosedNotice === undefined
+        ? currentSettings.saleClosedNotice
+        : cleanText_(source.saleClosedNotice, 300) ||
+          DEFAULT_SETTINGS_.saleClosedNotice,
+    iopenMallUrl:
+      source.iopenMallUrl === undefined
+        ? currentSettings.iopenMallUrl
+        : cleanText_(source.iopenMallUrl, 500),
   };
-  if (settings.bankQrUrl && !/^https:\/\//i.test(settings.bankQrUrl))
+  if (
+    !isFinite(settings.exchangeRate) ||
+    settings.exchangeRate <= 0 ||
+    settings.exchangeRate > 10 ||
+    !Number.isInteger(settings.fixedMarkupTwd) ||
+    settings.fixedMarkupTwd < 0 ||
+    settings.fixedMarkupTwd > 1000000 ||
+    !Number.isInteger(settings.depositPercent) ||
+    settings.depositPercent < 1 ||
+    settings.depositPercent > 100 ||
+    !Number.isInteger(settings.paymentReminderHours) ||
+    settings.paymentReminderHours < 1 ||
+    !Number.isInteger(settings.paymentDeadlineHours) ||
+    settings.paymentDeadlineHours <= settings.paymentReminderHours ||
+    !Number.isInteger(settings.paymentGraceHours) ||
+    settings.paymentGraceHours < 0 ||
+    !Number.isInteger(settings.iopenMallPaymentDays) ||
+    settings.iopenMallPaymentDays < 1 ||
+    settings.iopenMallPaymentDays > 60
+  )
     throw new Error("INVALID_SETTINGS");
   if (settings.iopenMallUrl && !/^https:\/\//i.test(settings.iopenMallUrl))
     throw new Error("INVALID_SETTINGS");
@@ -2866,16 +3104,42 @@ function handleAdminSaveSettings_(data) {
     var sheet = spreadsheet_().getSheetByName("Settings");
     var rows = [
       ["exchangeRate", settings.exchangeRate, "韓幣換算率"],
+      ["fixedMarkupTwd", settings.fixedMarkupTwd, "固定加價金額"],
+      ["depositPercent", settings.depositPercent, "訂金比例"],
+      [
+        "paymentReminderHours",
+        settings.paymentReminderHours,
+        "訂金提醒起始時間",
+      ],
+      [
+        "paymentDeadlineHours",
+        settings.paymentDeadlineHours,
+        "顧客付款期限",
+      ],
+      ["paymentGraceHours", settings.paymentGraceHours, "內部寬限時間"],
+      [
+        "iopenMallPaymentDays",
+        settings.iopenMallPaymentDays,
+        "iOPEN Mall 賣場付款期限",
+      ],
       ["preorderNotice", settings.preorderNotice, "前台預購說明"],
       ["saleClosed", settings.saleClosed, "前台停賣"],
       ["saleClosedNotice", settings.saleClosedNotice, "停賣公告"],
-      ["bankTransferInfo", settings.bankTransferInfo, "訂金匯款資訊"],
-      ["bankName", settings.bankName, "銀行名稱"],
-      ["bankCode", settings.bankCode, "銀行代碼"],
-      ["bankAccount", settings.bankAccount, "匯款帳號"],
-      ["bankAccountName", settings.bankAccountName, "匯款戶名"],
-      ["bankQrUrl", settings.bankQrUrl, "匯款 QR Code"],
       ["iopenMallUrl", settings.iopenMallUrl, "iOPEN Mall 網址"],
+      [
+        "bankTransferInfo",
+        currentSettings.bankTransferInfo,
+        "舊版訂金匯款資訊（停用）",
+      ],
+      ["bankName", currentSettings.bankName, "舊版銀行名稱（停用）"],
+      ["bankCode", currentSettings.bankCode, "舊版銀行代碼（停用）"],
+      ["bankAccount", currentSettings.bankAccount, "舊版匯款帳號（停用）"],
+      [
+        "bankAccountName",
+        currentSettings.bankAccountName,
+        "舊版匯款戶名（停用）",
+      ],
+      ["bankQrUrl", currentSettings.bankQrUrl, "舊版匯款 QR Code（停用）"],
     ];
     if (sheet.getLastRow() > 1)
       sheet
@@ -2886,6 +3150,40 @@ function handleAdminSaveSettings_(data) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function handleAdminChangeAccessCode_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var newAccessCode = String(data.newAccessCode || "").trim();
+  if (newAccessCode.length < 6 || newAccessCode.length > 64)
+    throw new Error("INVALID_ACCESS_CODE");
+  var salt = Utilities.getUuid() + Utilities.getUuid();
+  var properties = PropertiesService.getScriptProperties();
+  properties.setProperties({
+    ADMIN_ACCESS_CODE_HASH: hashAccessCode_(newAccessCode, salt),
+    ADMIN_ACCESS_CODE_SALT: salt,
+  });
+  properties.deleteProperty("ADMIN_ACCESS_CODE");
+  CacheService.getScriptCache().removeAll(["admin-session-" + data.adminSessionToken]);
+  PropertiesService.getScriptProperties().setProperty(
+    "ADMIN_SESSION_VERSION",
+    Utilities.getUuid(),
+  );
+  return json_({ ok: true });
+}
+
+function hashAccessCode_(accessCode, salt) {
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(salt) + ":" + String(accessCode),
+    Utilities.Charset.UTF_8,
+  );
+  return digest
+    .map(function (value) {
+      var byteValue = value < 0 ? value + 256 : value;
+      return ("0" + byteValue.toString(16)).slice(-2);
+    })
+    .join("");
 }
 
 function validatePreorderFields_(data) {
@@ -2912,6 +3210,7 @@ function validateProduct_(source) {
     name: cleanText_(source.name, 100),
     category: cleanText_(source.category, 30),
     imageUrl: cleanText_(source.imageUrl, 500),
+    krwPrice: Number(source.krwPrice || 0),
     priceTwd: Number(source.priceTwd),
     variants: variants,
     description: cleanText_(source.description, 500),
@@ -2921,6 +3220,12 @@ function validateProduct_(source) {
   if (!product.name || !product.category || !product.imageUrl)
     throw new Error("INVALID_PRODUCT");
   if (!/^https:\/\//i.test(product.imageUrl))
+    throw new Error("INVALID_PRODUCT");
+  if (
+    !Number.isInteger(product.krwPrice) ||
+    product.krwPrice < 0 ||
+    product.krwPrice > 1000000000
+  )
     throw new Error("INVALID_PRODUCT");
   if (
     !Number.isInteger(product.priceTwd) ||
@@ -2971,6 +3276,7 @@ function rowToProduct_(row, legacyExchangeRate) {
     name: String(row[1] || "").trim(),
     category: String(row[2] || "").trim(),
     imageUrl: String(row[3] || "").trim(),
+    krwPrice: number_(row[4]),
     priceTwd: priceTwd,
     variants: String(row[5] || "")
       .split(/\n/)
@@ -2995,6 +3301,22 @@ function readSettings_() {
     var key = String(row[0] || "").trim();
     if (key === "exchangeRate")
       settings.exchangeRate = number_(row[1]) || DEFAULT_SETTINGS_.exchangeRate;
+    if (key === "fixedMarkupTwd")
+      settings.fixedMarkupTwd = Math.max(0, number_(row[1]));
+    if (key === "depositPercent")
+      settings.depositPercent =
+        number_(row[1]) || DEFAULT_SETTINGS_.depositPercent;
+    if (key === "paymentReminderHours")
+      settings.paymentReminderHours =
+        number_(row[1]) || DEFAULT_SETTINGS_.paymentReminderHours;
+    if (key === "paymentDeadlineHours")
+      settings.paymentDeadlineHours =
+        number_(row[1]) || DEFAULT_SETTINGS_.paymentDeadlineHours;
+    if (key === "paymentGraceHours")
+      settings.paymentGraceHours = Math.max(0, number_(row[1]));
+    if (key === "iopenMallPaymentDays")
+      settings.iopenMallPaymentDays =
+        number_(row[1]) || DEFAULT_SETTINGS_.iopenMallPaymentDays;
     if (key === "preorderNotice")
       settings.preorderNotice = String(row[1] || "").trim();
     if (key === "saleClosed")
@@ -3032,9 +3354,14 @@ function readSettings_() {
 
 function requireAdmin_(idToken, adminSessionToken) {
   var token = String(adminSessionToken || "").trim();
+  var sessionVersion =
+    PropertiesService.getScriptProperties().getProperty(
+      "ADMIN_SESSION_VERSION",
+    ) || "1";
   if (
     token &&
-    CacheService.getScriptCache().get("admin-session-" + token) === "1"
+    CacheService.getScriptCache().get("admin-session-" + token) ===
+      sessionVersion
   ) {
     return { sub: "access-code-admin", name: "Admin" };
   }
@@ -3108,8 +3435,30 @@ function ensureSheet_(ss, name, headers) {
 function ensureSettingsSheet_(ss) {
   var sheet = ensureSheet_(ss, "Settings", SETTING_HEADERS_);
   if (sheet.getLastRow() < 2) {
-    sheet.getRange(2, 1, 11, 3).setValues([
+    sheet.getRange(2, 1, 18, 3).setValues([
       ["exchangeRate", DEFAULT_SETTINGS_.exchangeRate, "韓幣換算率"],
+      ["fixedMarkupTwd", DEFAULT_SETTINGS_.fixedMarkupTwd, "固定加價金額"],
+      ["depositPercent", DEFAULT_SETTINGS_.depositPercent, "訂金比例"],
+      [
+        "paymentReminderHours",
+        DEFAULT_SETTINGS_.paymentReminderHours,
+        "訂金提醒起始時間",
+      ],
+      [
+        "paymentDeadlineHours",
+        DEFAULT_SETTINGS_.paymentDeadlineHours,
+        "顧客付款期限",
+      ],
+      [
+        "paymentGraceHours",
+        DEFAULT_SETTINGS_.paymentGraceHours,
+        "內部寬限時間",
+      ],
+      [
+        "iopenMallPaymentDays",
+        DEFAULT_SETTINGS_.iopenMallPaymentDays,
+        "iOPEN Mall 賣場付款期限",
+      ],
       ["preorderNotice", DEFAULT_SETTINGS_.preorderNotice, "前台預購說明"],
       ["saleClosed", DEFAULT_SETTINGS_.saleClosed, "前台停賣"],
       ["saleClosedNotice", DEFAULT_SETTINGS_.saleClosedNotice, "停賣公告"],
@@ -3204,6 +3553,7 @@ function safeError_(error) {
     "ADMIN_CONFIG_MISSING",
     "ADMIN_ACCESS_CODE_MISSING",
     "ADMIN_LOGIN_FAILED",
+    "INVALID_ACCESS_CODE",
     "LINE_LOGIN_REQUIRED",
     "LINE_CONFIG_MISSING",
     "LINE_TOKEN_INVALID",

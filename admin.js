@@ -2,14 +2,14 @@ const CONFIG = window.QUOKKA_CONFIG || {};
 const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
 const PAYMENT_REPORTED_STATUS = "待確認訂金";
 const ORDER_COMPLETED_STATUS = "訂單已完成";
-const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, bankUploadBusy: false };
+const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
 
 async function initAdmin() {
   bindAdminEvents();
-  switchAdminPage(location.hash === "#products" ? "products" : "orders");
+  switchAdminPage(["products", "settings"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "orders");
   const savedSession = sessionStorage.getItem("quokkaAdminSession") || "";
   if (savedSession) {
     adminState.sessionToken = savedSession;
@@ -42,9 +42,12 @@ function bindAdminEvents() {
   document.getElementById("productSearch").addEventListener("input", renderAdminProducts);
   document.getElementById("statusFilter").addEventListener("change", renderAdminProducts);
   document.getElementById("productTwdPrice").addEventListener("input", updateAdminPricePreview);
+  document.getElementById("productKrwPrice").addEventListener("input", calculateProductTwdPrice);
   document.getElementById("productImageInput").addEventListener("change", uploadSelectedImage);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
+  document.getElementById("passwordForm").addEventListener("submit", changeAdminAccessCode);
+  ["paymentDeadlineHours", "paymentGraceHours"].forEach((id) => document.getElementById(id).addEventListener("input", updatePaymentRulePreview));
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
   document.getElementById("adminOrderList").addEventListener("click", handleOrderAction);
   document.getElementById("adminOrderList").addEventListener("change", handleOrderStatusChange);
@@ -57,7 +60,6 @@ function bindAdminEvents() {
   document.getElementById("orderEditorClose").addEventListener("click", () => document.getElementById("orderEditorDialog").close());
   document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
   document.getElementById("orderStatusFilter").addEventListener("change", renderAdminOrders);
-  document.getElementById("bankQrInput").addEventListener("change", uploadBankQr);
   document.querySelector(".admin-page-tabs").addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-page]");
     if (button) switchAdminPage(button.dataset.adminPage);
@@ -76,11 +78,12 @@ function toggleAdminAccessCodeVisibility() {
 }
 
 function switchAdminPage(page) {
-  const selected = page === "products" ? "products" : "orders";
+  const selected = ["orders", "products", "settings"].includes(page) ? page : "orders";
   document.getElementById("adminOrdersPage").hidden = selected !== "orders";
   document.getElementById("adminProductsPage").hidden = selected !== "products";
+  document.getElementById("adminSettingsPage").hidden = selected !== "settings";
   document.querySelectorAll("[data-admin-page]").forEach((button) => button.classList.toggle("active", button.dataset.adminPage === selected));
-  document.getElementById("adminPageTitle").textContent = selected === "orders" ? "訂單管理" : "商品管理";
+  document.getElementById("adminPageTitle").textContent = { orders: "訂單管理", products: "商品管理", settings: "系統設定" }[selected];
   history.replaceState(null, "", `#${selected}`);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -236,8 +239,8 @@ function renderAdminOrderCard(order) {
       ${mallExpiry}
       ${adjustmentHistory.length ? renderOrderAdjustmentHistory(order, adjustmentHistory) : ""}
       ${shortageHistory.length ? renderShortageHistory(order, shortageHistory) : ""}
-      ${order.reminderDue ? `<div class="order-reminder"><label>12小時未收到訂金通知<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
-      ${order.mallReminderDue ? `<div class="order-reminder"><label>七天賣場取消通知<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">七天賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
+      ${order.reminderDue ? `<div class="order-reminder"><label>訂金付款提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
+      ${order.mallReminderDue ? `<div class="order-reminder"><label>iOPEN Mall 到期前提醒<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
     </div>
   </article>`;
 }
@@ -453,7 +456,7 @@ function resetOrderEditorForReason() {
   document.getElementById("orderEditorWarning").textContent = shortageMode
     ? "缺貨只能減少或取消原有商品；已收訂金不會改寫，系統會計算調整後尾款或待退款。"
     : status === "待收訂金"
-      ? "尚未收款：儲存後會依新總額重算 50% 訂金，付款期限維持原訂時間。"
+      ? `尚未收款：儲存後會依新總額重算 ${Number(order.depositPercent || 50)}% 訂金，付款期限維持原訂時間。`
       : status === PAYMENT_REPORTED_STATUS
         ? "顧客已回報匯款：儲存後保留回報資料與原訂金金額，請核帳時一併確認差額。"
         : "訂金已核帳：儲存後不會改寫已收訂金；若有溢付，後台會顯示待處理差額。";
@@ -516,7 +519,7 @@ function updateOrderEditorPreview() {
   const totalQty = items.reduce((sum, item) => sum + (Number.isFinite(item.qty) ? item.qty : 0), 0);
   const total = items.reduce((sum, item) => sum + orderEditorUnitPrice(order, item) * (Number.isFinite(item.qty) ? item.qty : 0), 0);
   const status = normalizeAdminOrderStatus(order.status);
-  const adjustedOrderDeposit = Math.ceil(total * 0.5);
+  const adjustedOrderDeposit = Math.ceil(total * Number(order.depositPercent || 50) / 100);
   const receivedDeposit = status === "待收訂金" ? 0 : Number(order.depositTotal || 0);
   const settlementDeposit = status === "待收訂金" ? adjustedOrderDeposit : receivedDeposit;
   const balance = Math.max(total - settlementDeposit, 0);
@@ -693,22 +696,25 @@ function renderAdminProducts() {
     <img src="${escapeAttr(product.imageUrl || demoPlaceholder)}" alt="" />
     <div class="admin-product-info"><div class="admin-product-title"><h3>${escapeHtml(product.name)}</h3><span class="category-label">${escapeHtml(product.category)}</span></div>
     <p>台幣售價 NT$${formatNumber(product.priceTwd)}</p>
-    <div class="admin-card-actions"><button type="button" data-edit="${escapeAttr(product.id)}">編輯</button><button type="button" class="${product.active ? "toggle-on" : "toggle-off"}" data-toggle="${escapeAttr(product.id)}">${product.active ? "上架中" : "已下架"}</button></div></div>
+    <div class="admin-card-actions"><button type="button" data-edit="${escapeAttr(product.id)}">編輯</button><button type="button" class="${product.active ? "toggle-on" : "toggle-off"}" data-toggle="${escapeAttr(product.id)}">${product.active ? "上架中" : "缺貨"}</button></div></div>
   </article>`).join("");
   if (!products.length) setAdminStatus("沒有符合條件的商品。");
   else setAdminStatus("", true);
 }
 
 function openEditor(product = null) {
+  const categories = [...new Set(adminState.products.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  document.getElementById("categorySuggestions").innerHTML = categories.map((category) => `<option value="${escapeAttr(category)}"></option>`).join("");
   document.getElementById("editorTitle").textContent = product ? "編輯商品" : "新增商品";
   document.getElementById("productId").value = product?.id || "";
   document.getElementById("productName").value = product?.name || "";
   document.getElementById("productCategory").value = product?.category || "";
+  document.getElementById("productKrwPrice").value = product?.krwPrice || "";
   document.getElementById("productTwdPrice").value = product?.priceTwd || "";
   document.getElementById("productVariants").value = Array.isArray(product?.variants) ? product.variants.join(", ") : (product?.variants || "");
   document.getElementById("productDescription").value = product?.description || "";
   document.getElementById("productSortOrder").value = product?.sortOrder ?? adminState.products.length + 1;
-  document.getElementById("productActive").checked = product ? Boolean(product.active) : true;
+  document.getElementById("productStatus").value = product && !product.active ? "inactive" : "active";
   document.getElementById("productImageUrl").value = product?.imageUrl || "";
   document.getElementById("productImagePreview").src = product?.imageUrl || demoPlaceholder;
   document.getElementById("imageUploadHint").textContent = product?.imageUrl ? "點一下更換照片" : "拍照或從相簿選擇";
@@ -729,7 +735,7 @@ async function handleProductAction(event) {
     if (!result.ok) throw new Error(result.error || "TOGGLE_FAILED");
     product.active = result.product.active;
     renderAdminProducts();
-    showToast(product.active ? "商品已上架" : "商品已下架");
+    showToast(product.active ? "商品已上架" : "商品已設為缺貨");
   } catch (error) {
     showToast("更新失敗，請再試一次");
   } finally { toggleButton.disabled = false; }
@@ -772,11 +778,12 @@ async function saveProduct(event) {
       name: document.getElementById("productName").value.trim(),
       category: document.getElementById("productCategory").value.trim(),
       imageUrl: document.getElementById("productImageUrl").value.trim(),
+      krwPrice: Number(document.getElementById("productKrwPrice").value || 0),
       priceTwd: Number(document.getElementById("productTwdPrice").value),
       variants: parseVariants(document.getElementById("productVariants").value),
       description: document.getElementById("productDescription").value.trim(),
       sortOrder: Number(document.getElementById("productSortOrder").value || 0),
-      active: document.getElementById("productActive").checked,
+      active: document.getElementById("productStatus").value === "active",
     };
     if (!product.imageUrl) throw new Error("IMAGE_REQUIRED");
     const result = await adminPost({ action: "adminSaveProduct", product });
@@ -800,67 +807,104 @@ function fillSettings() {
   document.getElementById("saleClosed").checked = Boolean(adminState.settings.saleClosed);
   document.getElementById("saleClosedNotice").value = adminState.settings.saleClosedNotice || "本次連線已結束，謝謝大家的支持！";
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
-  document.getElementById("bankTransferInfoSetting").value = adminState.settings.bankTransferInfo || "";
-  document.getElementById("bankName").value = adminState.settings.bankName || "";
-  document.getElementById("bankCode").value = adminState.settings.bankCode || "";
-  document.getElementById("bankAccount").value = adminState.settings.bankAccount || "";
-  document.getElementById("bankAccountName").value = adminState.settings.bankAccountName || "";
-  document.getElementById("bankQrUrl").value = adminState.settings.bankQrUrl || "";
-  document.getElementById("bankQrPreview").src = adminState.settings.bankQrUrl || demoPlaceholder;
-  document.getElementById("bankQrHint").textContent = adminState.settings.bankQrUrl ? "點一下更換 QR Code（小卡不顯示）" : "上傳匯款 QR Code（小卡不顯示）";
+  document.getElementById("exchangeRate").value = adminState.settings.exchangeRate || 0.022;
+  document.getElementById("fixedMarkupTwd").value = adminState.settings.fixedMarkupTwd ?? 0;
+  document.getElementById("depositPercent").value = adminState.settings.depositPercent || 50;
+  document.getElementById("paymentReminderHours").value = adminState.settings.paymentReminderHours || 12;
+  document.getElementById("paymentDeadlineHours").value = adminState.settings.paymentDeadlineHours || 24;
+  document.getElementById("paymentGraceHours").value = adminState.settings.paymentGraceHours ?? 1;
   document.getElementById("iopenMallUrl").value = adminState.settings.iopenMallUrl || "";
+  document.getElementById("iopenMallPaymentDays").value = adminState.settings.iopenMallPaymentDays || 8;
+  updatePaymentRulePreview();
   updateAdminPricePreview();
 }
 
 async function saveSettings(event) {
   event.preventDefault();
-  if (adminState.bankUploadBusy) return showToast("請等 QR Code 上傳完成");
-  const settings = {
-    saleClosed: document.getElementById("saleClosed").checked,
-    saleClosedNotice: document.getElementById("saleClosedNotice").value.trim(),
-    preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
-    bankTransferInfo: document.getElementById("bankTransferInfoSetting").value.trim(),
-    bankName: document.getElementById("bankName").value.trim(),
-    bankCode: document.getElementById("bankCode").value.trim(),
-    bankAccount: document.getElementById("bankAccount").value.trim(),
-    bankAccountName: document.getElementById("bankAccountName").value.trim(),
-    bankQrUrl: document.getElementById("bankQrUrl").value.trim(),
-    iopenMallUrl: document.getElementById("iopenMallUrl").value.trim(),
-  };
+  const section = event.submitter?.dataset.settingsSection;
+  const settings = section === "storefront"
+    ? {
+        section,
+        saleClosed: document.getElementById("saleClosed").checked,
+        saleClosedNotice: document.getElementById("saleClosedNotice").value.trim(),
+        preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
+      }
+    : section === "pricing"
+      ? {
+          section,
+          exchangeRate: Number(document.getElementById("exchangeRate").value),
+          fixedMarkupTwd: Number(document.getElementById("fixedMarkupTwd").value),
+        }
+      : section === "deposit"
+        ? {
+            section,
+            depositPercent: Number(document.getElementById("depositPercent").value),
+            paymentReminderHours: Number(document.getElementById("paymentReminderHours").value),
+            paymentDeadlineHours: Number(document.getElementById("paymentDeadlineHours").value),
+            paymentGraceHours: Number(document.getElementById("paymentGraceHours").value),
+          }
+        : {
+            section: "mall",
+            iopenMallUrl: document.getElementById("iopenMallUrl").value.trim(),
+            iopenMallPaymentDays: Number(document.getElementById("iopenMallPaymentDays").value),
+          };
+  const button = event.submitter;
+  button.disabled = true;
   try {
     const result = await adminPost({ action: "adminSaveSettings", settings });
     if (!result.ok) throw new Error(result.error || "SETTINGS_FAILED");
     adminState.settings = result.settings;
     updateAdminPricePreview();
-    showToast(settings.saleClosed ? "已開啟前台停賣" : "已恢復前台販售");
-  } catch (error) { showToast("設定儲存失敗"); }
+    fillSettings();
+    showToast("設定已儲存");
+  } catch (error) {
+    showToast("設定儲存失敗");
+  } finally {
+    button.disabled = false;
+  }
 }
 
-async function uploadBankQr(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  adminState.bankUploadBusy = true;
-  document.getElementById("bankQrProgress").hidden = false;
+async function changeAdminAccessCode(event) {
+  event.preventDefault();
+  const code = document.getElementById("newAdminAccessCode").value.trim();
+  const confirmation = document.getElementById("confirmAdminAccessCode").value.trim();
+  if (code !== confirmation) return showToast("兩次輸入的登入碼不一致");
+  const button = event.submitter;
+  button.disabled = true;
+  button.textContent = "變更中…";
   try {
-    const compressed = await compressImage(file, 1600, .92);
-    document.getElementById("bankQrPreview").src = compressed.dataUrl;
-    const result = await adminPost({ action: "adminUploadProductImage", fileName: `bank-qr-${file.name}`, mimeType: "image/jpeg", base64Data: compressed.dataUrl.split(",")[1] });
-    if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
-    document.getElementById("bankQrUrl").value = result.imageUrl;
-    document.getElementById("bankQrPreview").src = result.imageUrl;
-    document.getElementById("bankQrHint").textContent = "點一下更換 QR Code（小卡不顯示）";
-    showToast("QR Code 上傳完成，記得儲存設定");
+    const result = await adminPost({ action: "adminChangeAccessCode", newAccessCode: code });
+    if (!result.ok) throw new Error(result.error || "PASSWORD_CHANGE_FAILED");
+    sessionStorage.removeItem("quokkaAdminSession");
+    adminState.sessionToken = "";
+    event.currentTarget.reset();
+    showAdminLogin("登入碼已變更，請使用新登入碼重新登入。");
   } catch (error) {
-    showToast("QR Code 上傳失敗，請換一張再試");
+    showToast("登入碼變更失敗，請再試一次");
   } finally {
-    adminState.bankUploadBusy = false;
-    document.getElementById("bankQrProgress").hidden = true;
-    event.target.value = "";
+    button.disabled = false;
+    button.textContent = "變更後台登入碼";
   }
 }
 
 function updateAdminPricePreview() {
+  document.getElementById("productExchangeRatePreview").textContent = adminState.settings.exchangeRate || 0.022;
+  document.getElementById("productFixedMarkupPreview").textContent = `NT$${formatNumber(adminState.settings.fixedMarkupTwd || 0)}`;
   document.getElementById("adminTwdPreview").textContent = `NT$${formatNumber(document.getElementById("productTwdPrice").value)}`;
+}
+
+function calculateProductTwdPrice() {
+  const krwPrice = Number(document.getElementById("productKrwPrice").value || 0);
+  if (krwPrice > 0) {
+    document.getElementById("productTwdPrice").value = Math.round(krwPrice * Number(adminState.settings.exchangeRate || 0.022) + Number(adminState.settings.fixedMarkupTwd || 0));
+  }
+  updateAdminPricePreview();
+}
+
+function updatePaymentRulePreview() {
+  const deadline = Number(document.getElementById("paymentDeadlineHours").value || 0);
+  const grace = Number(document.getElementById("paymentGraceHours").value || 0);
+  document.getElementById("paymentRulePreview").textContent = `顧客端顯示 ${deadline} 小時正式期限；系統於 ${deadline + grace} 小時後自動取消。`;
 }
 
 async function adminPost(payload) {
