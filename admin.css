@@ -121,13 +121,15 @@
 .line-alert span, .line-alert small { color: #4d765c; }
 .line-alert p, .mall-expiry-alert p { margin: 0; line-height: 1.55; }
 .line-alert-menu { margin-top: 2px; }
-.line-alert-menu summary { display: grid; min-height: 40px; padding: 9px 12px; place-items: center; border-radius: 10px; background: #06c755; color: white; font-weight: 800; cursor: pointer; list-style: none; }
+.line-alert-menu summary { display: flex; min-height: 40px; padding: 9px 12px; align-items: center; justify-content: space-between; border: 1px solid #9be8b8; border-radius: 10px; background: #dff8e7; color: #008d3a; font-weight: 800; cursor: pointer; list-style: none; }
+.line-alert-menu summary::after { content: "⌄"; font-size: 1rem; line-height: 1; }
 .line-alert-menu summary::-webkit-details-marker { display: none; }
 .line-alert-menu[open] summary { border-radius: 10px 10px 6px 6px; }
+.line-alert-menu[open] summary::after { content: "⌃"; }
 .line-alert-options { display: grid; gap: 7px; padding-top: 7px; }
 .line-alert-options button { min-height: 40px; padding: 8px 10px; border: 0; border-radius: 10px; background: #06c755; color: white; font-weight: 800; }
 .line-alert-options .is-reviewed { border: 1px solid #06c755; background: white; color: #009b40; }
-.line-alert-options .is-cancel { background: #d94149; }
+.line-alert-options .is-cancel { border: 1px solid #d94149; background: white; color: #c9363e; }
 .mall-expiry-alert { border: 1px solid #ef9db2; background: #fff3f5; color: #793443; }
 .mall-expiry-alert strong { color: #c9363e; font-size: .8rem; }
 .admin-order-card.mall-overdue { border-color: #c9363e; }

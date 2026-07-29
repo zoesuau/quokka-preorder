@@ -564,7 +564,7 @@ test("一般狀態選單不再顯示顧客回報選項", () => {
   const adminSource = fs.readFileSync("admin.js", "utf8");
   assert.equal(adminSource.includes("（顧客回報）"), false);
   assert.equal(adminSource.includes("data-resolve-line-order"), false);
-  assert.equal(adminSource.includes("處理 LINE 訊息"), true);
+  assert.equal(adminSource.includes("選擇處理方式"), true);
 });
 
 console.log(`\n${passed} 個訂單調整測試全部通過`);
