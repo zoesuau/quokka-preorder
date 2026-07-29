@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260729-shortage" />
+    <link rel="stylesheet" href="style.css?v=20260729-payment-report" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="storefront.js?v=20260729-shortage" defer></script>
+    <script src="storefront.js?v=20260729-payment-report" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -117,6 +117,23 @@
           <span>我了解這是預購商品；下單先付商品總額的 50% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。</span>
         </label>
         <button class="primary-button submit-button" id="submitOrder" type="submit">先送出預購訂單</button>
+      </form>
+    </dialog>
+
+    <dialog class="payment-report-dialog" id="paymentReportDialog" aria-labelledby="paymentReportTitle">
+      <form id="paymentReportForm">
+        <div class="checkout-header">
+          <div><p class="eyebrow">PAYMENT REPORT</p><h2 id="paymentReportTitle">回報已匯款</h2></div>
+          <button class="dialog-close" id="paymentReportClose" type="button" aria-label="關閉">×</button>
+        </div>
+        <p class="payment-report-order" id="paymentReportOrder"></p>
+        <input id="paymentReportOrderNo" type="hidden" />
+        <label class="field">
+          <span>匯款帳號後五碼 *</span>
+          <input id="paymentReportLast5" type="text" inputmode="numeric" autocomplete="off" maxlength="5" pattern="[0-9]{5}" placeholder="請輸入 5 位數字" required />
+        </label>
+        <p class="payment-report-note">送出後訂單會進入「待確認訂金」，管理員核帳完成後才會改為「已收到訂金」。</p>
+        <button class="primary-button" id="paymentReportSubmit" type="submit">確認回報</button>
       </form>
     </dialog>
 

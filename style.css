@@ -130,6 +130,15 @@ dialog::backdrop { background: rgba(55,43,36,.52); backdrop-filter: blur(3px); }
 .order-money span { color: var(--muted); font-size: .66rem; }
 .order-money strong { font-size: .82rem; }
 .payment-action { width: 100%; margin-top: 13px; padding: 11px; border: 1px solid var(--peach-dark); border-radius: 12px; background: white; color: var(--peach-dark); font-weight: 700; cursor: pointer; }
+.payment-report-action { width: 100%; margin-top: 13px; padding: 11px; border: 1px solid var(--sky-blue); border-radius: 12px; background: #edf5f8; color: var(--winter-blue); font-weight: 700; cursor: pointer; }
+.payment-report-action:focus-visible { outline: 3px solid rgba(92,164,207,.22); outline-offset: 2px; }
+.payment-report-complete { display: grid; gap: 3px; margin-top: 13px; padding: 11px 12px; border: 1px solid var(--sky-blue); border-radius: 12px; background: #edf5f8; color: var(--winter-blue); font-size: .75rem; }
+.payment-report-complete span { color: var(--muted); }
+.payment-report-dialog { padding: 20px; }
+.payment-report-dialog form { display: grid; }
+.payment-report-dialog .eyebrow { color: var(--sky-blue); }
+.payment-report-order { margin: 18px 0 2px; padding: 12px 13px; border-radius: 13px; background: #e7f1f5; color: var(--winter-blue); font-size: .82rem; font-weight: 700; line-height: 1.55; }
+.payment-report-note { margin: 2px 0 16px; color: var(--muted); font-size: .76rem; line-height: 1.65; }
 .mall-payment { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }
 .mall-payment p { margin: 0 0 9px; color: var(--muted); font-size: .76rem; line-height: 1.55; }
 .mall-payment .payment-action { display: block; margin-top: 0; background: var(--peach-dark); color: white; text-align: center; text-decoration: none; }

@@ -585,30 +585,36 @@ function buildUnifiedOrderCard_(order, title, message, options) {
     },
     { type: "separator", margin: "lg", color: "#C8D8DF" },
   ];
-  if (order.totalQty !== undefined)
-    body.push(moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"));
-  if (order.estimatedTotal !== undefined)
-    body.push(
-      moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
-    );
-  if (order.depositTotal !== undefined)
-    body.push(
-      moneyRow_(
-        options.depositLabel || "訂金",
-        "NT$" + formatMoney_(order.depositTotal),
-        "#EF0025",
-      ),
-    );
-  if (order.estimatedBalance !== undefined)
-    body.push(
-      moneyRow_(
-        options.balanceLabel || "後續應付",
-        "NT$" + formatMoney_(order.estimatedBalance),
-      ),
-    );
-  (options.extraRows || []).forEach(function (row) {
-    body.push(moneyRow_(row.label, row.value, row.color));
-  });
+  if (Array.isArray(options.moneyRows)) {
+    options.moneyRows.forEach(function (row) {
+      body.push(moneyRow_(row.label, row.value, row.color));
+    });
+  } else {
+    if (order.totalQty !== undefined)
+      body.push(moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"));
+    if (order.estimatedTotal !== undefined)
+      body.push(
+        moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
+      );
+    if (order.depositTotal !== undefined)
+      body.push(
+        moneyRow_(
+          options.depositLabel || "訂金",
+          "NT$" + formatMoney_(order.depositTotal),
+          "#EF0025",
+        ),
+      );
+    if (order.estimatedBalance !== undefined)
+      body.push(
+        moneyRow_(
+          options.balanceLabel || "後續應付",
+          "NT$" + formatMoney_(order.estimatedBalance),
+        ),
+      );
+    (options.extraRows || []).forEach(function (row) {
+      body.push(moneyRow_(row.label, row.value, row.color));
+    });
+  }
 
   var card = {
     type: "flex",
@@ -700,9 +706,7 @@ function buildUnifiedOrderSuccessCard_(order) {
         {
           type: "uri",
           label: "已匯款，前往回報",
-          uri:
-            "https://line.me/R/oaMessage/%40527tnlnn/?" +
-            encodeURIComponent("匯款資訊"),
+          uri: "https://zoesuau.github.io/quokka-preorder/?view=orders",
         },
       ],
     },
@@ -786,6 +790,73 @@ function buildUnifiedCancellationCard_(order) {
   );
 }
 
+function buildAdjustmentMoneyRows_(order) {
+  var receivedDeposit = number_(order.receivedDeposit);
+  var adjustedTotal = number_(order.adjustedTotal);
+  var adjustedOrderDeposit = Math.ceil(adjustedTotal * 0.5);
+  var originalOrderTotal =
+    order.originalOrderTotal !== undefined
+      ? number_(order.originalOrderTotal)
+      : number_(order.previousTotal);
+  var changedAmount =
+    order.changeAmount !== undefined
+      ? number_(order.changeAmount)
+      : Math.abs(adjustedTotal - number_(order.previousTotal));
+  var changeLabel =
+    order.changeType === "increase" ||
+    (order.changeType === undefined &&
+      adjustedTotal > number_(order.previousTotal))
+      ? "這次增加金額"
+      : order.changeType === "decrease" ||
+          (order.changeType === undefined &&
+            adjustedTotal < number_(order.previousTotal))
+        ? "這次扣除金額"
+        : "這次金額變動";
+  var receivedLabel =
+    order.status === ORDER_STATUS_PAYMENT_REPORTED_
+      ? "已回報訂金"
+      : "已收訂金";
+  var rows = [
+    {
+      label: "原訂單金額",
+      value: "NT$" + formatMoney_(originalOrderTotal),
+    },
+    {
+      label: receivedLabel,
+      value: "NT$" + formatMoney_(receivedDeposit),
+      color: "#EF0025",
+    },
+    {
+      label: "商品件數",
+      value: formatMoney_(order.totalQty) + " 件",
+    },
+    {
+      label: "調整後訂單總額",
+      value: "NT$" + formatMoney_(adjustedTotal),
+    },
+    {
+      label: "調整後訂單訂金",
+      value: "NT$" + formatMoney_(adjustedOrderDeposit),
+    },
+    {
+      label: changeLabel,
+      value: "NT$" + formatMoney_(changedAmount),
+    },
+    {
+      label: "調整後應付尾款",
+      value: "NT$" + formatMoney_(order.adjustedBalance),
+      color: "#EF0025",
+    },
+  ];
+  if (number_(order.cashRefundDue) > 0)
+    rows.push({
+      label: "待退款",
+      value: "NT$" + formatMoney_(order.cashRefundDue),
+      color: "#EF0025",
+    });
+  return rows;
+}
+
 function buildUnifiedShortageCard_(order) {
   var cancelledText = order.cancelledItems
     .map(function (item) {
@@ -811,17 +882,7 @@ function buildUnifiedShortageCard_(order) {
     "訂單缺貨調整",
     "以下缺貨品項已取消：\n" + cancelledText + "\n\n" + settlement,
     {
-      depositLabel: "已付訂金",
-      balanceLabel: "調整後後續應付",
-      extraRows: [
-        { label: "原訂單金額", value: "NT$" + formatMoney_(order.originalTotal) },
-        { label: "本次扣除", value: "NT$" + formatMoney_(order.cancelledAmount) },
-        {
-          label: "調整後金額",
-          value: "NT$" + formatMoney_(order.adjustedTotal),
-          color: "#EF0025",
-        },
-      ],
+      moneyRows: buildAdjustmentMoneyRows_(order),
     },
   );
 }
@@ -848,7 +909,9 @@ function buildUnifiedOrderAdjustmentCard_(order) {
     })
     .join("\n");
   var message =
-    "訂單內容已由管理員更新：\n" +
+    "訂單內容已由管理員更新（" +
+    String(order.reasonLabel || "管理修正") +
+    "）：\n" +
     changeText +
     "\n\n訂單狀態維持「" +
     status +
@@ -876,20 +939,7 @@ function buildUnifiedOrderAdjustmentCard_(order) {
     "訂單內容已更新",
     message,
     {
-      depositLabel:
-        status === ORDER_STATUS_PENDING_ ? "應付訂金（50%）" : "原訂金保留",
-      balanceLabel: "調整後後續應付",
-      extraRows: [
-        {
-          label: "調整前金額",
-          value: "NT$" + formatMoney_(order.previousTotal),
-        },
-        {
-          label: "調整後金額",
-          value: "NT$" + formatMoney_(order.adjustedTotal),
-          color: "#EF0025",
-        },
-      ],
+      moneyRows: buildAdjustmentMoneyRows_(order),
     },
   );
 }
@@ -922,11 +972,20 @@ function handleConfirmPreorderPayment_(data) {
       if (String(row[2]).trim() !== profile.sub)
         throw new Error("ORDER_FORBIDDEN");
       var currentStatus = normalizeOrderStatus_(row[15], row[17]);
+      if (currentStatus === ORDER_STATUS_PAYMENT_REPORTED_) {
+        if (String(row[13] || "").trim() !== transferLast5)
+          throw new Error("INVALID_ORDER_STATUS");
+        return json_({
+          ok: true,
+          duplicate: true,
+          orderNo: orderNo,
+          status: ORDER_STATUS_PAYMENT_REPORTED_,
+          transferLast5: transferLast5,
+          paymentReportedAt: row[29],
+        });
+      }
       if (
-        [
-          ORDER_STATUS_PENDING_,
-          ORDER_STATUS_PAYMENT_REPORTED_,
-        ].indexOf(currentStatus) < 0
+        [ORDER_STATUS_PENDING_].indexOf(currentStatus) < 0
       )
         throw new Error("INVALID_ORDER_STATUS");
       sheet.getRange(index + 2, 13).setValue("銀行轉帳");
@@ -940,6 +999,7 @@ function handleConfirmPreorderPayment_(data) {
         ok: true,
         orderNo: orderNo,
         status: ORDER_STATUS_PAYMENT_REPORTED_,
+        transferLast5: transferLast5,
         paymentReportedAt: paymentReportedAt,
       });
     }
@@ -980,6 +1040,10 @@ function handleReadMyPreorders_(data) {
       cashRefundDue: number_(row[26]),
       cashRefundedAt: row[27],
       status: status,
+      transferLast5:
+        status === ORDER_STATUS_PAYMENT_REPORTED_ ? row[13] : "",
+      paymentReportedAt:
+        status === ORDER_STATUS_PAYMENT_REPORTED_ ? row[29] : "",
       shippedAt: row[18],
       iopenMallUrl:
         mallDeadline && !mallDeadline.expired ? settings.iopenMallUrl : "",
@@ -1508,12 +1572,22 @@ function handleAdminAdjustOrder_(data) {
   var orderNo = String(data.orderNo || "").trim();
   var requestedItems = Array.isArray(data.items) ? data.items : [];
   var adjustmentId = String(data.adjustmentId || "").trim().slice(0, 100);
+  var reason = String(data.reason || "").trim();
+  var reasonLabels = {
+    customer_change: "顧客變更",
+    admin_correction: "管理修正",
+  };
   var expectedRevision = Number(data.expectedRevision || 0);
   var expectedStatus = normalizeOrderStatus_(
     String(data.expectedStatus || ""),
     "",
   );
-  if (!orderNo || !requestedItems.length || !adjustmentId)
+  if (
+    !orderNo ||
+    !requestedItems.length ||
+    !adjustmentId ||
+    !reasonLabels[reason]
+  )
     throw new Error("INVALID_ORDER_ADJUSTMENT");
 
   var lock = LockService.getScriptLock();
@@ -1633,6 +1707,9 @@ function handleAdminAdjustOrder_(data) {
       status === ORDER_STATUS_PENDING_
         ? Math.ceil(adjustedTotal * 0.5)
         : previousDeposit;
+    var adjustedOrderDeposit = Math.ceil(adjustedTotal * 0.5);
+    var receivedDeposit =
+      status === ORDER_STATUS_PENDING_ ? 0 : previousDeposit;
     var adjustedBalance = Math.max(adjustedTotal - adjustedDeposit, 0);
     var adjustmentDue =
       status === ORDER_STATUS_DEPOSIT_RECEIVED_
@@ -1644,10 +1721,13 @@ function handleAdminAdjustOrder_(data) {
       adjustmentId: adjustmentId,
       adjustedAt: adjustedAt,
       status: status,
+      reason: reason,
+      reasonLabel: reasonLabels[reason],
       previousTotal: previousTotal,
       adjustedTotal: adjustedTotal,
       previousDeposit: previousDeposit,
       adjustedDeposit: adjustedDeposit,
+      adjustedOrderDeposit: adjustedOrderDeposit,
       previousBalance: previousBalance,
       adjustedBalance: adjustedBalance,
       changes: changes,
@@ -1708,8 +1788,21 @@ function handleAdminAdjustOrder_(data) {
       status: status,
       previousTotal: previousTotal,
       adjustedTotal: adjustedTotal,
+      adjustedOrderDeposit: adjustedOrderDeposit,
+      receivedDeposit: receivedDeposit,
+      originalOrderTotal: previousTotal,
+      changeAmount: Math.abs(adjustedTotal - previousTotal),
+      changeType:
+        adjustedTotal > previousTotal
+          ? "increase"
+          : adjustedTotal < previousTotal
+            ? "decrease"
+            : "none",
       changes: changes,
       adjustmentDue: adjustmentDue,
+      cashRefundDue: adjustmentDue,
+      reason: reason,
+      reasonLabel: reasonLabels[reason],
     };
   } finally {
     lock.releaseLock();
@@ -1766,7 +1859,14 @@ function handleAdminAdjustOrderShortage_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var orderNo = String(data.orderNo || "").trim();
   var requested = Array.isArray(data.cancellations) ? data.cancellations : [];
-  if (!orderNo || !requested.length) throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
+  var adjustmentId = String(data.adjustmentId || "").trim().slice(0, 100);
+  var expectedRevision = Number(data.expectedRevision || 0);
+  var expectedStatus = normalizeOrderStatus_(
+    String(data.expectedStatus || ""),
+    "",
+  );
+  if (!orderNo || !requested.length || !adjustmentId)
+    throw new Error("INVALID_SHORTAGE_ADJUSTMENT");
 
   var lock = LockService.getScriptLock();
   var result;
@@ -1780,6 +1880,17 @@ function handleAdminAdjustOrderShortage_(data) {
     var row = sheet
       .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
       .getDisplayValues()[0];
+    var adjustments = parseJsonArray_(row[24]);
+    var duplicate = adjustments.some(function (entry) {
+      return String((entry && entry.adjustmentId) || "") === adjustmentId;
+    });
+    if (duplicate) {
+      return json_({
+        ok: true,
+        duplicate: true,
+        order: { orderNo: orderNo, notificationAttempted: false },
+      });
+    }
     var currentStatus = normalizeOrderStatus_(row[15], row[17]);
     if (
       [ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_SHIPPED_].indexOf(
@@ -1787,6 +1898,9 @@ function handleAdminAdjustOrderShortage_(data) {
       ) < 0
     )
       throw new Error("SHORTAGE_REQUIRES_DEPOSIT");
+    if (expectedStatus !== currentStatus) throw new Error("ORDER_CHANGED");
+    var currentRevision = number_(row[33]);
+    if (expectedRevision !== currentRevision) throw new Error("ORDER_CHANGED");
 
     var currentItems = parseJsonArray_(row[6]);
     if (!currentItems.length) throw new Error("NO_ITEMS_TO_ADJUST");
@@ -1854,9 +1968,9 @@ function handleAdminAdjustOrderShortage_(data) {
     var adjustedBalance = Math.max(adjustedTotal - depositTotal, 0);
     var cashRefundDue = Math.max(depositTotal - adjustedTotal, 0);
     var adjustedAt = formatDateTime_(new Date());
-    var adjustments = parseJsonArray_(row[24]);
-    var nextOrderRevision = number_(row[33]) + 1;
+    var nextOrderRevision = currentRevision + 1;
     adjustments.push({
+      adjustmentId: adjustmentId,
       adjustedAt: adjustedAt,
       previousTotal: previousTotal,
       cancelledAmount: cancelledAmount,
@@ -1948,8 +2062,14 @@ function handleAdminAdjustOrderShortage_(data) {
       cancelledAmount: cancelledAmount,
       adjustedTotal: adjustedTotal,
       depositTotal: depositTotal,
+      adjustedOrderDeposit: Math.ceil(adjustedTotal * 0.5),
+      receivedDeposit: depositTotal,
       adjustedBalance: adjustedBalance,
       estimatedBalance: adjustedBalance,
+      status: currentStatus,
+      originalOrderTotal: previousTotal,
+      changeAmount: cancelledAmount,
+      changeType: "decrease",
       cashRefundDue: cashRefundDue,
       allItemsCancelled: allItemsCancelled,
       cancelledItems: cancelledItems,

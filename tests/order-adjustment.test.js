@@ -52,6 +52,7 @@ function createHarness(status, overrides = {}) {
   });
 
   const sheet = {
+    getLastRow: () => 2,
     getRange(_rowNumber, column, _rowCount, columnCount = 1) {
       return {
         getDisplayValues: () => [row.slice(column - 1, column - 1 + columnCount)],
@@ -70,6 +71,7 @@ function createHarness(status, overrides = {}) {
     },
   };
   context.requireAdmin_ = () => {};
+  context.verifyLineIdToken_ = () => ({ sub: "U123" });
   context.setupQuokkaPreorder = () => {};
   context.spreadsheet_ = () => ({ getSheetByName: () => sheet });
   context.findOrderRow_ = () => 2;
@@ -103,6 +105,7 @@ function request(items, extra = {}) {
     orderNo: "QK-TEST",
     adjustmentId: "adjustment-1",
     expectedRevision: 0,
+    reason: "admin_correction",
     items,
     ...extra,
   };
@@ -222,10 +225,182 @@ test("缺貨調整也會推進版本，避免舊編輯頁覆蓋", () => {
   const { context, row } = createHarness("已收到訂金");
   context.handleAdminAdjustOrderShortage_({
     orderNo: "QK-TEST",
+    adjustmentId: "shortage-1",
+    expectedRevision: 0,
+    expectedStatus: "已收到訂金",
     cancellations: [{ index: 0, qty: 1 }],
   });
   assert.equal(row[33], 1);
   assert.equal(JSON.parse(row[6])[0].qty, 1);
+});
+
+test("一般調整只接受顧客變更或管理修正", () => {
+  const { context } = createHarness("待收訂金");
+  assert.throws(
+    () =>
+      context.handleAdminAdjustOrder_(
+        request([{ productId: "p1", variant: "紅", qty: 1 }], {
+          expectedStatus: "待收訂金",
+          reason: "shortage",
+        }),
+      ),
+    /INVALID_ORDER_ADJUSTMENT/,
+  );
+});
+
+test("缺貨調整拒絕舊版本並防止重複處理", () => {
+  const { context } = createHarness("已收到訂金", { 33: 2 });
+  assert.throws(
+    () =>
+      context.handleAdminAdjustOrderShortage_({
+        orderNo: "QK-TEST",
+        adjustmentId: "shortage-stale",
+        expectedRevision: 1,
+        expectedStatus: "已收到訂金",
+        cancellations: [{ index: 0, qty: 1 }],
+      }),
+    /ORDER_CHANGED/,
+  );
+
+  const existing = JSON.stringify([{ adjustmentId: "shortage-duplicate" }]);
+  const duplicateHarness = createHarness("已收到訂金", { 24: existing });
+  const duplicate = duplicateHarness.context.handleAdminAdjustOrderShortage_({
+    orderNo: "QK-TEST",
+    adjustmentId: "shortage-duplicate",
+    expectedRevision: 0,
+    expectedStatus: "已收到訂金",
+    cancellations: [{ index: 0, qty: 1 }],
+  });
+  assert.equal(duplicate.ok, true);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicateHarness.row[9], 200);
+});
+
+test("顧客回報後五碼後自動進入待確認訂金", () => {
+  const { context, row } = createHarness("待收訂金");
+  const result = context.handleConfirmPreorderPayment_({
+    idToken: "valid",
+    orderNo: "QK-TEST",
+    transferLast5: "55555",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "待確認訂金");
+  assert.equal(row[12], "銀行轉帳");
+  assert.equal(row[13], "55555");
+  assert.equal(row[15], "待確認訂金");
+  assert.equal(row[29], "2026-07-29 14:00:00");
+});
+
+test("相同後五碼重送為冪等，不同後五碼則拒絕", () => {
+  const { context } = createHarness("待確認訂金", {
+    13: "55555",
+    29: "2026-07-29 13:50:00",
+  });
+  const duplicate = context.handleConfirmPreorderPayment_({
+    idToken: "valid",
+    orderNo: "QK-TEST",
+    transferLast5: "55555",
+  });
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.paymentReportedAt, "2026-07-29 13:50:00");
+  assert.throws(
+    () =>
+      context.handleConfirmPreorderPayment_({
+        idToken: "valid",
+        orderNo: "QK-TEST",
+        transferLast5: "12345",
+      }),
+    /INVALID_ORDER_STATUS/,
+  );
+});
+
+test("非訂單本人不能回報匯款", () => {
+  const { context } = createHarness("待收訂金");
+  context.verifyLineIdToken_ = () => ({ sub: "U999" });
+  assert.throws(
+    () =>
+      context.handleConfirmPreorderPayment_({
+        idToken: "valid",
+        orderNo: "QK-TEST",
+        transferLast5: "55555",
+      }),
+    /ORDER_FORBIDDEN/,
+  );
+});
+
+function cardMoneyLabels(card) {
+  return Array.from(card.contents.body.contents)
+    .filter(
+      (entry) =>
+        entry.type === "box" &&
+        entry.layout === "horizontal" &&
+        Array.isArray(entry.contents) &&
+        entry.contents[0]?.type === "text",
+    )
+    .map((entry) => entry.contents[0].text)
+    .filter((label) => !["訂購人", "訂單時間"].includes(label));
+}
+
+test("一般調整 LINE 卡片使用固定金額欄位順序", () => {
+  const { context } = createHarness("待確認訂金");
+  const card = context.buildUnifiedOrderAdjustmentCard_({
+    orderNo: "QK-TEST",
+    createdAt: "2026-07-29 10:00:00",
+    customerName: "Zoe",
+    itemsSummary: "商品 A｜紅 × 1",
+    totalQty: 1,
+    adjustedTotal: 100,
+    adjustedBalance: 0,
+    originalOrderTotal: 200,
+    receivedDeposit: 100,
+    changeAmount: 100,
+    changeType: "decrease",
+    status: "待確認訂金",
+    reasonLabel: "管理修正",
+    changes: [],
+  });
+  assert.deepEqual(cardMoneyLabels(card), [
+    "原訂單金額",
+    "已回報訂金",
+    "商品件數",
+    "調整後訂單總額",
+    "調整後訂單訂金",
+    "這次扣除金額",
+    "調整後應付尾款",
+  ]);
+});
+
+test("缺貨 LINE 卡片共用金額順序並在溢付時另列待退款", () => {
+  const { context } = createHarness("已收到訂金");
+  const card = context.buildUnifiedShortageCard_({
+    orderNo: "QK-TEST",
+    createdAt: "2026-07-29 10:00:00",
+    customerName: "Zoe",
+    itemsSummary: "品項已全數取消",
+    totalQty: 0,
+    adjustedTotal: 0,
+    adjustedBalance: 0,
+    originalOrderTotal: 200,
+    receivedDeposit: 100,
+    changeAmount: 200,
+    changeType: "decrease",
+    status: "已收到訂金",
+    cashRefundDue: 100,
+    allItemsCancelled: true,
+    cancelledItems: [
+      { name: "商品 A", variant: "紅", qty: 2, subtotalTwd: 200 },
+    ],
+  });
+  assert.deepEqual(cardMoneyLabels(card), [
+    "原訂單金額",
+    "已收訂金",
+    "商品件數",
+    "調整後訂單總額",
+    "調整後訂單訂金",
+    "這次扣除金額",
+    "調整後應付尾款",
+    "待退款",
+  ]);
 });
 
 console.log(`\n${passed} 個訂單調整測試全部通過`);

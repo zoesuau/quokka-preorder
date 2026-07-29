@@ -48,10 +48,8 @@ function bindAdminEvents() {
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
   document.getElementById("adminOrderList").addEventListener("click", handleOrderAction);
   document.getElementById("adminOrderList").addEventListener("change", handleOrderStatusChange);
-  document.getElementById("shortageForm").addEventListener("submit", submitShortageAdjustment);
-  document.getElementById("shortageItemList").addEventListener("input", updateShortagePreview);
-  document.getElementById("shortageDialogClose").addEventListener("click", () => document.getElementById("shortageDialog").close());
   document.getElementById("orderEditorForm").addEventListener("submit", submitOrderAdjustment);
+  document.getElementById("orderEditorReason").addEventListener("change", resetOrderEditorForReason);
   document.getElementById("orderEditorItems").addEventListener("input", updateOrderEditorPreview);
   document.getElementById("orderEditorItems").addEventListener("change", handleOrderEditorItemChange);
   document.getElementById("orderEditorItems").addEventListener("click", handleOrderEditorItemClick);
@@ -197,8 +195,7 @@ function renderAdminOrderCard(order) {
   const shortageHistory = Array.isArray(order.shortageAdjustments) ? order.shortageAdjustments : [];
   const adjustmentHistory = Array.isArray(order.orderAdjustments) ? order.orderAdjustments : [];
   const latestAdjustment = adjustmentHistory[adjustmentHistory.length - 1] || null;
-  const canEditOrder = ["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金"].includes(status);
-  const canAdjustShortage = ["已收到訂金", IOPEN_MALL_READY_STATUS].includes(status) && items.length > 0;
+  const canEditOrder = ["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金", IOPEN_MALL_READY_STATUS].includes(status) && items.length > 0;
   const primaryAmount = ["待收訂金", PAYMENT_REPORTED_STATUS].includes(status)
     ? { label: "訂金金額", value: order.depositTotal }
     : [IOPEN_MALL_READY_STATUS, "已收到訂金"].includes(status)
@@ -234,7 +231,6 @@ function renderAdminOrderCard(order) {
       </dl>
       <div class="order-status-actions">
         <label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}><option value="待收訂金" ${status === "待收訂金" ? "selected" : ""}>待收訂金</option><option value="${PAYMENT_REPORTED_STATUS}" ${status === PAYMENT_REPORTED_STATUS ? "selected" : ""} disabled>${PAYMENT_REPORTED_STATUS}（顧客回報）</option><option value="已收到訂金" ${status === "已收到訂金" ? "selected" : ""}>已收到訂金</option><option value="${IOPEN_MALL_READY_STATUS}" ${status === IOPEN_MALL_READY_STATUS ? "selected" : ""}>${IOPEN_MALL_READY_STATUS}</option><option value="${ORDER_COMPLETED_STATUS}" ${status === ORDER_COMPLETED_STATUS ? "selected" : ""}>${ORDER_COMPLETED_STATUS}</option><option class="status-cancel-option" value="已取消" ${status === "已取消" ? "selected" : ""}>取消訂單</option></select></label>
-        ${canAdjustShortage ? `<button class="shortage-action" type="button" data-shortage-order="${escapeAttr(order.orderNo)}">取消缺貨品項</button>` : ""}
       </div>
       ${lineAlert}
       ${mallExpiry}
@@ -272,7 +268,7 @@ function renderOrderAdjustmentHistory(order, history) {
     <summary><span>查看調整紀錄（${formatNumber(history.length)}）</span><b>${escapeHtml(order.orderAdjustedAt || entries[0]?.adjustedAt || "")}</b></summary>
     <div class="order-adjustment-history-list">${entries.map((entry) => {
       const changes = Array.isArray(entry.changes) ? entry.changes : [];
-      return `<section><div><strong>${escapeHtml(entry.adjustedAt || "")}</strong><span>${escapeHtml(entry.status || "")}</span></div>
+      return `<section><div><strong>${escapeHtml(entry.adjustedAt || "")}</strong><span>${escapeHtml(entry.reasonLabel || entry.status || "")}</span></div>
         <ul>${changes.map((change) => {
           const item = change.after || change.before || {};
           const name = `${item.name || ""}${item.variant ? `｜${item.variant}` : ""}`;
@@ -291,7 +287,7 @@ function renderOrderAdjustmentHistory(order, history) {
 }
 
 async function handleOrderAction(event) {
-  const button = event.target.closest("[data-edit-order], [data-reminder-order], [data-mall-reminder-order], [data-shortage-order], [data-refund-order], [data-resolve-line-order]");
+  const button = event.target.closest("[data-edit-order], [data-reminder-order], [data-mall-reminder-order], [data-refund-order], [data-resolve-line-order]");
   if (!button) return;
   if (button.dataset.editOrder) {
     openOrderEditor(button.dataset.editOrder);
@@ -309,10 +305,6 @@ async function handleOrderAction(event) {
       button.disabled = false;
       showToast("目前無法解除訊息保護");
     }
-    return;
-  }
-  if (button.dataset.shortageOrder) {
-    openShortageDialog(button.dataset.shortageOrder);
     return;
   }
   if (button.dataset.refundOrder) {
@@ -377,8 +369,13 @@ function orderEditorVariantOptions(product, selectedVariant, allowOriginalOnly =
   return variants.map((variant) => `<option value="${escapeAttr(variant)}" ${variant === selectedVariant ? "selected" : ""}>${escapeHtml(variant || "無款式")}</option>`).join("");
 }
 
+function getOrderEditorReason() {
+  return document.getElementById("orderEditorReason").value;
+}
+
 function addOrderEditorRow(item = null) {
   const list = document.getElementById("orderEditorItems");
+  const shortageMode = getOrderEditorReason() === "shortage";
   const defaultProduct = item
     ? adminState.products.find((product) => product.id === item.productId)
     : adminState.products.find((product) => product.active);
@@ -397,10 +394,10 @@ function addOrderEditorRow(item = null) {
   row.dataset.originalVariant = source.variant || "";
   row.dataset.originalName = source.name || "";
   row.dataset.originalPrice = String(source.unitPriceTwd || (Number(source.subtotalTwd || 0) / Number(source.qty || 1)) || 0);
-  row.innerHTML = `<label><span>商品</span><select data-order-editor-product>${orderEditorProductOptions(source)}</select></label>
-    <label><span>款式</span><select data-order-editor-variant>${orderEditorVariantOptions(product, source.variant || "", Boolean(product && !product.active))}</select></label>
+  row.innerHTML = `<label><span>商品</span><select data-order-editor-product ${shortageMode ? "disabled" : ""}>${orderEditorProductOptions(source)}</select></label>
+    <label><span>款式</span><select data-order-editor-variant ${shortageMode ? "disabled" : ""}>${orderEditorVariantOptions(product, source.variant || "", Boolean(product && !product.active))}</select></label>
     <label class="order-editor-qty"><span>數量</span><input data-order-editor-qty type="number" min="1" max="20" step="1" inputmode="numeric" value="${Number(source.qty || 1)}" /></label>
-    <button class="order-editor-remove" type="button" data-order-editor-remove aria-label="移除此品項">移除</button>`;
+    <button class="order-editor-remove" type="button" data-order-editor-remove aria-label="移除此品項">${shortageMode ? "缺貨取消" : "移除"}</button>`;
   list.appendChild(row);
   updateOrderEditorPreview();
 }
@@ -409,25 +406,43 @@ function openOrderEditor(orderNo) {
   const order = adminState.orders.find((entry) => entry.orderNo === orderNo);
   if (!order) return;
   const status = normalizeAdminOrderStatus(order.status);
-  if (!["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金"].includes(status)) return;
+  if (!["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金", IOPEN_MALL_READY_STATUS].includes(status)) return;
   document.getElementById("orderEditorOrderNo").value = orderNo;
   document.getElementById("orderEditorRevision").value = Number(order.orderRevision || 0);
   document.getElementById("orderEditorTitle").textContent = status === "待收訂金" ? "編輯訂單" : "調整訂單";
   document.getElementById("orderEditorMessage").textContent = `${orderNo}｜目前狀態：${status}`;
+  const reason = document.getElementById("orderEditorReason");
+  reason.innerHTML = status === IOPEN_MALL_READY_STATUS
+    ? `<option value="shortage">韓國現場缺貨</option>`
+    : status === "已收到訂金"
+      ? `<option value="customer_change">顧客變更</option><option value="admin_correction" selected>管理修正</option><option value="shortage">韓國現場缺貨</option>`
+      : `<option value="customer_change">顧客變更</option><option value="admin_correction" selected>管理修正</option>`;
+  reason.disabled = status === IOPEN_MALL_READY_STATUS;
+  resetOrderEditorForReason();
+  document.getElementById("orderEditorDialog").showModal();
+}
+
+function resetOrderEditorForReason() {
+  const order = getOrderEditorContext();
+  if (!order) return;
+  const status = normalizeAdminOrderStatus(order.status);
+  const shortageMode = getOrderEditorReason() === "shortage";
   document.getElementById("orderEditorItems").innerHTML = "";
   (order.items || []).forEach((item) => addOrderEditorRow(item));
-  document.getElementById("orderEditorWarning").textContent = status === "待收訂金"
-    ? "尚未收款：儲存後會依新總額重算 50% 訂金，付款期限維持原訂時間。"
-    : status === PAYMENT_REPORTED_STATUS
-      ? "顧客已回報匯款：儲存後保留回報資料與原訂金金額，請核帳時一併確認差額。"
-      : "訂金已核帳：儲存後不會改寫已收訂金；若有溢付，後台會顯示待處理差額。";
+  document.getElementById("orderEditorAdd").hidden = shortageMode;
+  document.getElementById("orderEditorWarning").textContent = shortageMode
+    ? "缺貨只能減少或取消原有商品；已收訂金不會改寫，系統會計算調整後尾款或待退款。"
+    : status === "待收訂金"
+      ? "尚未收款：儲存後會依新總額重算 50% 訂金，付款期限維持原訂時間。"
+      : status === PAYMENT_REPORTED_STATUS
+        ? "顧客已回報匯款：儲存後保留回報資料與原訂金金額，請核帳時一併確認差額。"
+        : "訂金已核帳：儲存後不會改寫已收訂金；若有溢付，後台會顯示待處理差額。";
   updateOrderEditorPreview();
-  document.getElementById("orderEditorDialog").showModal();
 }
 
 function handleOrderEditorItemChange(event) {
   const productSelect = event.target.closest("[data-order-editor-product]");
-  if (!productSelect) return;
+  if (!productSelect || getOrderEditorReason() === "shortage") return;
   const row = productSelect.closest(".order-editor-item");
   const product = adminState.products.find((entry) => entry.id === productSelect.value);
   const variantSelect = row.querySelector("[data-order-editor-variant]");
@@ -456,20 +471,38 @@ function orderEditorUnitPrice(order, item) {
   return Number(adminState.products.find((product) => product.id === item.productId)?.priceTwd || 0);
 }
 
+function getOrderEditorCancellations(order, items) {
+  const desiredByKey = new Map(items.map((item) => [adminOrderItemKey(item), item]));
+  return (order.items || []).map((item, index) => {
+    const desired = desiredByKey.get(adminOrderItemKey(item));
+    return { index, qty: Number(item.qty || 0) - Number(desired?.qty || 0) };
+  }).filter((entry) => entry.qty > 0);
+}
+
 function updateOrderEditorPreview() {
   const order = getOrderEditorContext();
   if (!order) return;
   const items = readOrderEditorItems();
   const keys = items.map(adminOrderItemKey);
+  const shortageMode = getOrderEditorReason() === "shortage";
   const invalidQty = items.some((item) => !Number.isInteger(item.qty) || item.qty < 1 || item.qty > 20);
   const duplicate = new Set(keys).size !== keys.length;
+  const originalByKey = new Map((order.items || []).map((item) => [adminOrderItemKey(item), item]));
+  const invalidShortage = shortageMode && items.some((item) => {
+    const original = originalByKey.get(adminOrderItemKey(item));
+    return !original || item.qty > Number(original.qty || 0);
+  });
+  const cancellations = getOrderEditorCancellations(order, items);
   const totalQty = items.reduce((sum, item) => sum + (Number.isFinite(item.qty) ? item.qty : 0), 0);
   const total = items.reduce((sum, item) => sum + orderEditorUnitPrice(order, item) * (Number.isFinite(item.qty) ? item.qty : 0), 0);
   const status = normalizeAdminOrderStatus(order.status);
-  const deposit = status === "待收訂金" ? Math.ceil(total * 0.5) : Number(order.depositTotal || 0);
-  const balance = Math.max(total - deposit, 0);
-  const overflow = status === "已收到訂金" ? Math.max(deposit - total, 0) : 0;
-  const error = !items.length
+  const adjustedOrderDeposit = Math.ceil(total * 0.5);
+  const receivedDeposit = status === "待收訂金" ? 0 : Number(order.depositTotal || 0);
+  const settlementDeposit = status === "待收訂金" ? adjustedOrderDeposit : receivedDeposit;
+  const balance = Math.max(total - settlementDeposit, 0);
+  const overflow = ["已收到訂金", IOPEN_MALL_READY_STATUS].includes(status) ? Math.max(receivedDeposit - total, 0) : 0;
+  const changedAmount = Math.abs(total - Number(order.estimatedTotal || 0));
+  const error = !items.length && !shortageMode
     ? "訂單不可沒有商品；若要整筆取消，請使用訂單狀態。"
     : invalidQty
       ? "每個品項數量須為 1～20。"
@@ -477,11 +510,21 @@ function updateOrderEditorPreview() {
         ? "單筆訂單最多 100 件。"
         : duplicate
           ? "相同商品與款式不可重複，請合併數量。"
+          : invalidShortage
+            ? "缺貨調整只能減少原有商品，不能新增或增加數量。"
+            : shortageMode && !cancellations.length
+              ? "請減少數量或移除至少一個缺貨品項。"
           : "";
-  document.getElementById("orderEditorPreview").innerHTML = `<div><span>調整前總額</span><strong>NT $${formatNumber(order.estimatedTotal)}</strong></div>
-    <div><span>調整後總額</span><strong>NT $${formatNumber(total)}</strong></div>
-    <div><span>${status === "待收訂金" ? "重算後訂金" : "原訂金保留"}</span><strong>NT $${formatNumber(deposit)}</strong></div>
-    <div><span>${overflow > 0 ? "待處理溢付" : "後續應付"}</span><strong>NT $${formatNumber(overflow || balance)}</strong></div>
+  const receivedLabel = status === PAYMENT_REPORTED_STATUS ? "已回報訂金" : "已收訂金";
+  const changeLabel = total > Number(order.estimatedTotal || 0) ? "這次增加金額" : total < Number(order.estimatedTotal || 0) ? "這次扣除金額" : "這次金額變動";
+  document.getElementById("orderEditorPreview").innerHTML = `<div><span>原訂單金額</span><strong>NT $${formatNumber(order.estimatedTotal)}</strong></div>
+    <div><span>${receivedLabel}</span><strong>NT $${formatNumber(receivedDeposit)}</strong></div>
+    <div><span>商品件數</span><strong>${formatNumber(totalQty)} 件</strong></div>
+    <div><span>調整後訂單總額</span><strong>NT $${formatNumber(total)}</strong></div>
+    <div><span>調整後訂單訂金</span><strong>NT $${formatNumber(adjustedOrderDeposit)}</strong></div>
+    <div><span>${changeLabel}</span><strong>NT $${formatNumber(changedAmount)}</strong></div>
+    <div><span>調整後應付尾款</span><strong>NT $${formatNumber(balance)}</strong></div>
+    ${overflow > 0 ? `<div><span>待處理退款</span><strong>NT $${formatNumber(overflow)}</strong></div>` : ""}
     ${error ? `<p>${escapeHtml(error)}</p>` : ""}`;
   document.getElementById("orderEditorSubmit").disabled = Boolean(error);
 }
@@ -493,108 +536,38 @@ async function submitOrderAdjustment(event) {
   submit.disabled = true;
   submit.textContent = "處理中…";
   try {
-    const result = await adminPost({
-      action: "adminAdjustOrder",
+    const order = getOrderEditorContext();
+    const items = readOrderEditorItems();
+    const shortageMode = getOrderEditorReason() === "shortage";
+    const common = {
       orderNo,
       expectedRevision: Number(document.getElementById("orderEditorRevision").value || 0),
-      expectedStatus: normalizeAdminOrderStatus(getOrderEditorContext()?.status || ""),
+      expectedStatus: normalizeAdminOrderStatus(order?.status || ""),
       adjustmentId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      items: readOrderEditorItems(),
-    });
+    };
+    const result = await adminPost(shortageMode
+      ? { action: "adminAdjustOrderShortage", ...common, cancellations: getOrderEditorCancellations(order, items) }
+      : { action: "adminAdjustOrder", ...common, reason: getOrderEditorReason(), items });
     if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
     document.getElementById("orderEditorDialog").close();
     await loadAdminProducts();
     showToast(result.duplicate
       ? "此筆調整已處理，未重複送出"
       : result.order.notificationSent
-        ? "訂單已調整並發送通知"
-        : "訂單已調整，但 LINE 通知未送達");
+        ? `${shortageMode ? "缺貨" : "訂單"}調整完成並發送通知`
+        : `${shortageMode ? "缺貨" : "訂單"}調整完成，但 LINE 通知未送達`);
   } catch (error) {
     const messages = {
       NO_ORDER_CHANGES: "訂單內容沒有變更",
       ORDER_CHANGED: "訂單已在其他頁面更新，請重新整理後再試",
       ORDER_EDIT_NOT_ALLOWED: "此狀態不可編輯訂單",
       PRODUCT_CHANGED: "商品已下架或款式已變更，請重新選擇",
+      INVALID_SHORTAGE_ADJUSTMENT: "缺貨品項或數量不正確",
     };
     showToast(messages[error.message] || "訂單調整失敗，請重新確認");
   } finally {
     submit.disabled = false;
     submit.textContent = "確認修改並通知";
-  }
-}
-
-function openShortageDialog(orderNo) {
-  const order = adminState.orders.find((entry) => entry.orderNo === orderNo);
-  if (!order) return;
-  document.getElementById("shortageOrderNo").value = orderNo;
-  document.getElementById("shortageItemList").innerHTML = order.items.map((item, index) => {
-    const unitPrice = Number(item.unitPriceTwd || (Number(item.subtotalTwd || 0) / Number(item.qty || 1)) || 0);
-    return `<label class="shortage-item">
-      <input type="checkbox" data-shortage-check="${index}" />
-      <span><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}<em>NT $${formatNumber(unitPrice)}／件</em></span>
-      <input type="number" data-shortage-qty="${index}" min="1" max="${Number(item.qty)}" value="${Number(item.qty)}" inputmode="numeric" disabled aria-label="${escapeAttr(item.name)}取消數量" />
-      <b>／${formatNumber(item.qty)}</b>
-    </label>`;
-  }).join("");
-  document.querySelectorAll("[data-shortage-check]").forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      const qty = document.querySelector(`[data-shortage-qty="${checkbox.dataset.shortageCheck}"]`);
-      qty.disabled = !checkbox.checked;
-      updateShortagePreview();
-    });
-  });
-  updateShortagePreview();
-  document.getElementById("shortageDialog").showModal();
-}
-
-function getShortageSelection() {
-  return [...document.querySelectorAll("[data-shortage-check]:checked")].map((checkbox) => ({
-    index: Number(checkbox.dataset.shortageCheck),
-    qty: Number(document.querySelector(`[data-shortage-qty="${checkbox.dataset.shortageCheck}"]`).value),
-  }));
-}
-
-function updateShortagePreview() {
-  const order = adminState.orders.find((entry) => entry.orderNo === document.getElementById("shortageOrderNo").value);
-  if (!order) return;
-  const cancellations = getShortageSelection();
-  const cancelledAmount = cancellations.reduce((sum, entry) => {
-    const item = order.items[entry.index];
-    const unitPrice = Number(item?.unitPriceTwd || (Number(item?.subtotalTwd || 0) / Number(item?.qty || 1)) || 0);
-    return sum + unitPrice * Math.max(0, Math.min(entry.qty, Number(item?.qty || 0)));
-  }, 0);
-  const adjustedTotal = Math.max(0, Number(order.estimatedTotal || 0) - cancelledAmount);
-  const balance = Math.max(0, adjustedTotal - Number(order.depositTotal || 0));
-  const refund = Math.max(0, Number(order.depositTotal || 0) - adjustedTotal);
-  const remainingQty = order.items.reduce((sum, item) => sum + Number(item.qty || 0), 0) - cancellations.reduce((sum, entry) => sum + entry.qty, 0);
-  document.getElementById("shortagePreview").innerHTML = cancellations.length
-    ? `<div><span>本次扣除</span><strong>NT $${formatNumber(cancelledAmount)}</strong></div><div><span>調整後總額</span><strong>NT $${formatNumber(adjustedTotal)}</strong></div><div><span>${refund > 0 ? "待退現金" : "後續應付"}</span><strong>NT $${formatNumber(refund || balance)}</strong></div>${remainingQty <= 0 ? `<p>所有品項都將取消，此訂單會改為「已取消」。</p>` : ""}`
-    : `<p>請勾選現場缺貨的商品。</p>`;
-  document.getElementById("shortageSubmit").disabled = !cancellations.length;
-}
-
-async function submitShortageAdjustment(event) {
-  event.preventDefault();
-  const orderNo = document.getElementById("shortageOrderNo").value;
-  const cancellations = getShortageSelection();
-  if (!cancellations.length) return;
-  const submit = document.getElementById("shortageSubmit");
-  submit.disabled = true;
-  submit.textContent = "處理中…";
-  try {
-    const result = await adminPost({ action: "adminAdjustOrderShortage", orderNo, cancellations });
-    if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
-    const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
-    if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
-    document.getElementById("shortageDialog").close();
-    await loadAdminProducts();
-    showToast(result.order.notificationSent ? "缺貨品項已取消並發送通知" : "缺貨品項已取消，但 LINE 通知未送達");
-  } catch (error) {
-    console.error(error);
-    showToast("缺貨調整失敗，請重新確認數量");
-  } finally {
-    submit.disabled = false;
-    submit.textContent = "確認取消並通知";
   }
 }
 
