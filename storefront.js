@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-window.QUOKKA_APP_VERSION = "20260729-payment-report";
+window.QUOKKA_APP_VERSION = "20260729-no-payment-report";
 const state = {
   products: [],
   settings: { preorderNotice: "", bankTransferInfo: "", saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
@@ -45,9 +45,6 @@ function bindEvents() {
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
   document.getElementById("myOrdersButton").addEventListener("click", showMyOrders);
   document.getElementById("backToCatalog").addEventListener("click", showCatalog);
-  document.getElementById("orderList").addEventListener("click", handleOrderListAction);
-  document.getElementById("paymentReportForm").addEventListener("submit", submitPaymentReport);
-  document.getElementById("paymentReportClose").addEventListener("click", () => document.getElementById("paymentReportDialog").close());
   document.getElementById("catalogSearch").addEventListener("input", (event) => {
     state.search = event.target.value.trim();
     renderCatalog();
@@ -428,63 +425,10 @@ function renderOrder(order) {
   const shortageNotice = order.shortageAdjustedAt
     ? `<div class="order-shortage-notice"><strong>已完成缺貨調整</strong><span>原總額 NT$${formatNumber(order.originalEstimatedTotal)} → 調整後 NT$${formatNumber(order.estimatedTotal)}</span>${Number(order.cashRefundDue || 0) > 0 ? `<span>${order.cashRefundedAt ? "已退現金" : order.status === "已取消" ? "待退款" : "出貨時待退現金"} NT$${formatNumber(order.cashRefundDue)}</span>` : ""}</div>`
     : "";
-  const paymentReport = order.status === "待收訂金"
-    ? `<button class="payment-report-action" type="button" data-report-payment="${escapeAttr(order.orderNo)}">回報已匯款</button>`
-    : order.status === "待確認訂金"
+  const paymentReport = order.status === "待確認訂金"
       ? `<div class="payment-report-complete"><strong>已回報匯款後五碼 ${escapeHtml(order.transferLast5 || "")}</strong><span>${escapeHtml(order.paymentReportedAt || "等待管理員核帳")}</span></div>`
       : "";
   return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status ${order.mallPaymentExpired ? "overdue" : ""}">${escapeHtml(displayStatus)}</span></div><pre>${escapeHtml(order.itemsSummary || "品項已全數取消")}</pre>${shortageNotice}<div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>${depositLabel}</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>後續應付</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${paymentReport}${mallAction}</article>`;
-}
-
-function handleOrderListAction(event) {
-  const button = event.target.closest("[data-report-payment]");
-  if (!button) return;
-  const order = (state.myOrders || []).find((entry) => entry.orderNo === button.dataset.reportPayment);
-  if (!order || order.status !== "待收訂金") return;
-  document.getElementById("paymentReportOrderNo").value = order.orderNo;
-  document.getElementById("paymentReportOrder").textContent = `訂單 ${order.orderNo}｜應付訂金 NT$${formatNumber(order.depositTotal)}`;
-  document.getElementById("paymentReportLast5").value = "";
-  document.getElementById("paymentReportDialog").showModal();
-  document.getElementById("paymentReportLast5").focus();
-}
-
-async function submitPaymentReport(event) {
-  event.preventDefault();
-  const orderNo = document.getElementById("paymentReportOrderNo").value;
-  const transferLast5 = document.getElementById("paymentReportLast5").value.trim();
-  if (!/^\d{5}$/.test(transferLast5)) return showToast("請輸入 5 位數字的匯款後五碼");
-  const submit = document.getElementById("paymentReportSubmit");
-  submit.disabled = true;
-  submit.textContent = "回報中…";
-  try {
-    const result = await apiPost({
-      action: "confirmPreorderPayment",
-      idToken: state.line.idToken,
-      orderNo,
-      transferLast5,
-    });
-    if (!result.ok) throw new Error(result.error || "PAYMENT_REPORT_FAILED");
-    const order = (state.myOrders || []).find((entry) => entry.orderNo === orderNo);
-    if (order) Object.assign(order, {
-      status: result.status,
-      transferLast5: result.transferLast5,
-      paymentReportedAt: result.paymentReportedAt,
-    });
-    document.getElementById("paymentReportDialog").close();
-    document.getElementById("orderList").innerHTML = (state.myOrders || []).map(renderOrder).join("");
-    showToast(result.duplicate ? "這筆匯款已回報，等待管理員核帳" : "匯款資料已回報，等待管理員核帳");
-  } catch (error) {
-    const messages = {
-      INVALID_TRANSFER_LAST5: "請輸入正確的 5 位數字",
-      INVALID_ORDER_STATUS: "此訂單目前不能回報匯款，請重新整理",
-      ORDER_FORBIDDEN: "這筆訂單不屬於目前登入的 LINE 帳號",
-      LINE_TOKEN_INVALID: "LINE 登入已過期，請重新開啟訂購系統",
-    };
-    showToast(messages[error.message] || "目前無法回報匯款，請稍後再試");
-  } finally {
-    submit.disabled = false;
-    submit.textContent = "確認回報";
-  }
 }
 
 async function apiPost(payload) {

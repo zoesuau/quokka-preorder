@@ -328,58 +328,6 @@ test("缺貨調整拒絕舊版本並防止重複處理", () => {
   assert.equal(duplicateHarness.row[9], 200);
 });
 
-test("顧客回報後五碼後自動進入待確認訂金", () => {
-  const { context, row } = createHarness("待收訂金");
-  const result = context.handleConfirmPreorderPayment_({
-    idToken: "valid",
-    orderNo: "QK-TEST",
-    transferLast5: "55555",
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.status, "待確認訂金");
-  assert.equal(row[12], "銀行轉帳");
-  assert.equal(row[13], "55555");
-  assert.equal(row[15], "待確認訂金");
-  assert.equal(row[29], "2026-07-29 14:00:00");
-});
-
-test("相同後五碼重送為冪等，不同後五碼則拒絕", () => {
-  const { context } = createHarness("待確認訂金", {
-    13: "55555",
-    29: "2026-07-29 13:50:00",
-  });
-  const duplicate = context.handleConfirmPreorderPayment_({
-    idToken: "valid",
-    orderNo: "QK-TEST",
-    transferLast5: "55555",
-  });
-  assert.equal(duplicate.duplicate, true);
-  assert.equal(duplicate.paymentReportedAt, "2026-07-29 13:50:00");
-  assert.throws(
-    () =>
-      context.handleConfirmPreorderPayment_({
-        idToken: "valid",
-        orderNo: "QK-TEST",
-        transferLast5: "12345",
-      }),
-    /INVALID_ORDER_STATUS/,
-  );
-});
-
-test("非訂單本人不能回報匯款", () => {
-  const { context } = createHarness("待收訂金");
-  context.verifyLineIdToken_ = () => ({ sub: "U999" });
-  assert.throws(
-    () =>
-      context.handleConfirmPreorderPayment_({
-        idToken: "valid",
-        orderNo: "QK-TEST",
-        transferLast5: "55555",
-      }),
-    /ORDER_FORBIDDEN/,
-  );
-});
-
 function cardMoneyLabels(card) {
   return Array.from(card.contents.body.contents)
     .filter(
@@ -560,11 +508,27 @@ test("警示已被其他頁面處理時不會再改訂單狀態", () => {
   assert.equal(pushes.length, 0);
 });
 
-test("一般狀態選單不再顯示顧客回報選項", () => {
+test("本次停用顧客匯款回報入口與藍色狀態轉換", () => {
+  const backendSource = fs.readFileSync("Code.gs", "utf8");
+  const storefrontSource = fs.readFileSync("storefront.js", "utf8");
+  const storefrontHtml = fs.readFileSync("index.html", "utf8");
+  assert.equal(backendSource.includes('if (action === "confirmPreorderPayment")'), false);
+  assert.equal(backendSource.includes("已匯款，前往回報"), false);
+  assert.equal(backendSource.includes("if (status !== ORDER_STATUS_PENDING_) return;"), true);
+  assert.equal(storefrontSource.includes("data-report-payment"), false);
+  assert.equal(storefrontSource.includes('action: "confirmPreorderPayment"'), false);
+  assert.equal(storefrontHtml.includes("paymentReportDialog"), false);
+});
+
+test("LINE 核對只在待收訂金卡片顯示直接操作按鈕", () => {
   const adminSource = fs.readFileSync("admin.js", "utf8");
   assert.equal(adminSource.includes("（顧客回報）"), false);
   assert.equal(adminSource.includes("data-resolve-line-order"), false);
-  assert.equal(adminSource.includes("選擇處理方式"), true);
+  assert.equal(adminSource.includes('status === "待收訂金" && Number(order.lineAlertCount || 0) > 0'), true);
+  assert.equal(adminSource.includes("訂金已入帳"), true);
+  assert.equal(adminSource.includes("尚未入帳"), true);
+  assert.equal(adminSource.includes("選擇處理方式"), false);
+  assert.equal(adminSource.includes("line-alert-menu"), false);
 });
 
 console.log(`\n${passed} 個訂單調整測試全部通過`);

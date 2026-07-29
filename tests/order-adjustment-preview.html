@@ -11,9 +11,9 @@
     <main class="admin-main">
       <section class="admin-orders-section">
         <div class="admin-order-list">
-          <article class="admin-order-card deposit-received">
+          <article class="admin-order-card pending">
             <header>
-              <div><span>已收到訂金</span><h3>Zoe</h3></div>
+              <div><span>待收訂金</span><h3>Zoe</h3></div>
               <b>QK260729-DEMO01</b>
             </header>
             <div class="order-card-toolbar"><button type="button">調整訂單</button></div>
@@ -37,20 +37,17 @@
                 <div><dt>訂金金額</dt><dd>NT $1,500</dd></div>
               </dl>
               <div class="order-status-actions">
-                <label><span>訂單狀態</span><select><option>待收訂金</option><option selected>已收到訂金</option><option>已開設 iOPEN Mall 賣場</option><option>訂單已完成</option><option>取消訂單</option></select></label>
+                <label><span>訂單狀態</span><select><option selected>待收訂金</option><option>已收到訂金</option><option>已開設 iOPEN Mall 賣場</option><option>訂單已完成</option><option>取消訂單</option></select></label>
               </div>
               <section class="line-alert">
                 <strong>LINE 有新訊息待核對</strong>
                 <span>1 則・文字・2026-07-29 15:40:15</span>
                 <p>銀行 App 分享匯款資訊</p>
                 <small>核對前系統不會自動取消這筆訂單。</small>
-                <details class="line-alert-menu" open>
-                  <summary>選擇處理方式</summary>
-                  <div class="line-alert-options">
-                    <button type="button">確認已收到訂金</button>
-                    <button class="is-reviewed" type="button">不是付款訊息，標記已查看</button>
-                  </div>
-                </details>
+                <div class="line-alert-actions">
+                  <button type="button">訂金已入帳</button>
+                  <button class="is-unpaid" type="button">尚未入帳</button>
+                </div>
               </section>
               <details class="order-adjustment-history" open>
                 <summary><span>查看調整紀錄（1）</span><b>2026-07-29 14:30:00</b></summary>

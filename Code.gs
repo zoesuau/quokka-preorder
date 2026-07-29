@@ -113,8 +113,6 @@ function doPost(e) {
     var action = String(data.action || "").trim();
 
     if (action === "createPreorder") return handleCreatePreorder_(data);
-    if (action === "confirmPreorderPayment")
-      return handleConfirmPreorderPayment_(data);
     if (action === "recordLineWebhookSignals")
       return handleRecordLineWebhookSignals_(data);
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
@@ -403,12 +401,7 @@ function readPendingOrderNosByUser_() {
     .getDisplayValues();
   rows.forEach(function (row) {
     var status = normalizeOrderStatus_(row[15], row[17]);
-    if (
-      [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
-        status,
-      ) < 0
-    )
-      return;
+    if (status !== ORDER_STATUS_PENDING_) return;
     var userId = String(row[2] || "").trim();
     if (!userId) return;
     if (!result[userId]) result[userId] = [];
@@ -423,10 +416,6 @@ function buildOrderSuccessMessage_(order) {
     order.orderNo +
     "\n收件人姓名：" +
     order.customerName;
-  var reportText = "匯款資訊";
-  var reportUrl =
-    "https://line.me/R/oaMessage/%40527tnlnn/?" +
-    encodeURIComponent(reportText);
   var bodyContents = [
     {
       type: "text",
@@ -528,12 +517,6 @@ function buildOrderSuccessMessage_(order) {
               label: "匯款資訊",
               text: transferRequestText,
             },
-          },
-          {
-            type: "button",
-            style: "secondary",
-            height: "sm",
-            action: { type: "uri", label: "已匯款，前往回報", uri: reportUrl },
           },
         ],
       },
@@ -702,11 +685,6 @@ function buildUnifiedOrderSuccessCard_(order) {
           type: "message",
           label: "匯款資訊",
           text: transferRequestText,
-        },
-        {
-          type: "uri",
-          label: "已匯款，前往回報",
-          uri: "https://zoesuau.github.io/quokka-preorder/?view=orders",
         },
       ],
     },
@@ -1098,9 +1076,7 @@ function readAdminOrders_() {
           ? buildMallPaymentDeadline_(row[18])
           : null;
       var lineAlerts =
-        [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
-          status,
-        ) >= 0
+        status === ORDER_STATUS_PENDING_
           ? (lineAlertsByUser[String(row[2] || "").trim()] || []).filter(
               function (alert) {
                 return (
