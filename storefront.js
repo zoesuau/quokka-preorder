@@ -1,8 +1,10 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-window.QUOKKA_APP_VERSION = "20260729-no-payment-report";
+window.QUOKKA_APP_VERSION = "20260729-orders-first";
 const state = {
   products: [],
   settings: { preorderNotice: "", bankTransferInfo: "", saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
+  catalogReady: false,
+  catalogLoadPromise: null,
   category: "全部",
   search: "",
   cart: [],
@@ -21,21 +23,34 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   document.getElementById("brandName").textContent = CONFIG.brandName || "袋著走";
   bindEvents();
-  try {
-    await loadCatalog();
-  } catch (error) {
-    if (error?.message !== "API_URL_NOT_CONFIGURED") console.error(error);
-    useDemoCatalog();
-  }
+  const ordersShortcut = isOrdersShortcut();
+  if (ordersShortcut) showOrdersLoading();
+  if (!ordersShortcut) await ensureCatalogLoaded();
   try {
     await initLine();
-    if (isOrdersShortcut() && document.documentElement.dataset.lineStatus === "verified") {
+    if (ordersShortcut && document.documentElement.dataset.lineStatus === "verified") {
       await showMyOrders();
+      void ensureCatalogLoaded();
     }
   } catch (error) {
     setLineStatus(error?.message || "LIFF_INIT_FAILED");
     console.error(error);
   }
+}
+
+function ensureCatalogLoaded() {
+  if (state.catalogReady) return Promise.resolve();
+  if (state.catalogLoadPromise) return state.catalogLoadPromise;
+  state.catalogLoadPromise = loadCatalog()
+    .catch((error) => {
+      if (error?.message !== "API_URL_NOT_CONFIGURED") console.error(error);
+      useDemoCatalog();
+    })
+    .finally(() => {
+      state.catalogReady = true;
+      state.catalogLoadPromise = null;
+    });
+  return state.catalogLoadPromise;
 }
 
 function bindEvents() {
@@ -354,9 +369,10 @@ async function submitOrder(event) {
 
 function updateSaleClosedState() {
   const dialog = document.getElementById("saleClosedDialog");
+  const viewingOrders = !document.getElementById("ordersView").hidden;
   document.getElementById("saleClosedNotice").textContent = state.settings.saleClosedNotice || "本次連線已結束，謝謝大家的支持！";
   document.getElementById("cartDock").hidden = Boolean(state.settings.saleClosed) || state.cart.length === 0;
-  if (state.settings.saleClosed) {
+  if (state.settings.saleClosed && !viewingOrders) {
     ["productDialog", "checkoutDialog"].forEach((id) => {
       const openDialog = document.getElementById(id);
       if (openDialog.open) openDialog.close();
@@ -368,16 +384,9 @@ function updateSaleClosedState() {
 }
 
 async function showMyOrders() {
-  const saleClosedDialog = document.getElementById("saleClosedDialog");
-  if (saleClosedDialog.open) saleClosedDialog.close();
-  document.getElementById("catalogView").hidden = true;
-  document.getElementById("ordersView").hidden = false;
-  document.getElementById("cartDock").hidden = true;
+  showOrdersLoading();
   const status = document.getElementById("ordersStatus");
   const list = document.getElementById("orderList");
-  list.innerHTML = "";
-  status.hidden = false;
-  status.textContent = "正在讀取我的預購…";
   if (!CONFIG.apiUrl || !state.line.idToken) {
     status.textContent = "請從 LINE 開啟正式預購頁，即可查看自己的訂單。";
     return;
@@ -402,10 +411,24 @@ async function showMyOrders() {
   }
 }
 
-function showCatalog() {
+function showOrdersLoading() {
+  const saleClosedDialog = document.getElementById("saleClosedDialog");
+  if (saleClosedDialog.open) saleClosedDialog.close();
+  document.getElementById("catalogView").hidden = true;
+  document.getElementById("ordersView").hidden = false;
+  document.getElementById("cartDock").hidden = true;
+  const status = document.getElementById("ordersStatus");
+  const list = document.getElementById("orderList");
+  list.innerHTML = "";
+  status.hidden = false;
+  status.textContent = "正在讀取我的預購…";
+}
+
+async function showCatalog() {
   document.getElementById("catalogView").hidden = false;
   document.getElementById("ordersView").hidden = true;
   updateCart();
+  if (!state.catalogReady) await ensureCatalogLoaded();
   if (state.settings.saleClosed) updateSaleClosedState();
 }
 

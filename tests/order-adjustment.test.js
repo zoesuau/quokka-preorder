@@ -531,4 +531,39 @@ test("LINE 核對只在待收訂金卡片顯示直接操作按鈕", () => {
   assert.equal(adminSource.includes("line-alert-menu"), false);
 });
 
+test("訂單成立卡片只保留傳送匯款資訊訊息按鈕", () => {
+  const { context } = createHarness("待收訂金");
+  const card = context.buildUnifiedOrderSuccessCard_({
+    orderNo: "QK-TEST",
+    createdAt: "2026-07-29 10:00:00",
+    customerName: "Zoe",
+    itemsSummary: "商品 A｜紅 × 1",
+    totalQty: 1,
+    estimatedTotal: 200,
+    depositTotal: 100,
+    estimatedBalance: 100,
+  });
+  const buttons = card.contents.footer.contents;
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].action.type, "message");
+  assert.equal(buttons[0].action.label, "匯款資訊");
+  assert.match(buttons[0].action.text, /^您好，我想索取匯款資訊/);
+  assert.match(buttons[0].action.text, /訂單編號：QK-TEST/);
+});
+
+test("歷史訂單捷徑先讀訂單，商品目錄延後背景載入", () => {
+  const storefrontSource = fs.readFileSync("storefront.js", "utf8");
+  const initStart = storefrontSource.indexOf("async function init()");
+  const shortcutStart = storefrontSource.indexOf("if (ordersShortcut) showOrdersLoading()", initStart);
+  const regularCatalogLoad = storefrontSource.indexOf("if (!ordersShortcut) await ensureCatalogLoaded()", initStart);
+  const ordersLoad = storefrontSource.indexOf("await showMyOrders()", initStart);
+  const backgroundCatalogLoad = storefrontSource.indexOf("void ensureCatalogLoaded()", ordersLoad);
+  assert.ok(initStart >= 0);
+  assert.ok(shortcutStart > initStart);
+  assert.ok(regularCatalogLoad > shortcutStart);
+  assert.ok(ordersLoad > regularCatalogLoad);
+  assert.ok(backgroundCatalogLoad > ordersLoad);
+  assert.equal(storefrontSource.includes("state.settings.saleClosed && !viewingOrders"), true);
+});
+
 console.log(`\n${passed} 個訂單調整測試全部通過`);
