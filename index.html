@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260729-orders-first" />
+    <link rel="stylesheet" href="style.css?v=20260801-product-gallery" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="storefront.js?v=20260729-system-settings" defer></script>
+    <script src="storefront.js?v=20260801-product-gallery" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -70,7 +70,10 @@
       <form method="dialog">
         <button class="dialog-close" aria-label="關閉">×</button>
       </form>
-      <img id="dialogImage" alt="" />
+      <div class="product-dialog-gallery">
+        <img id="dialogImage" alt="" />
+        <div class="product-dialog-thumbnails" id="dialogImageThumbnails" aria-label="商品照片"></div>
+      </div>
       <div class="dialog-body">
         <span class="category-label" id="dialogCategory"></span>
         <h2 id="dialogName"></h2>

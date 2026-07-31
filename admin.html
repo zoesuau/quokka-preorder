@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260719-twd-price" />
-    <link rel="stylesheet" href="admin.css?v=20260729-system-settings" />
+    <link rel="stylesheet" href="style.css?v=20260801-product-inventory" />
+    <link rel="stylesheet" href="admin.css?v=20260801-product-inventory" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260729-system-settings" defer></script>
+    <script src="admin.js?v=20260801-product-inventory" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -149,24 +149,28 @@
       </div>
       <form id="productForm">
         <input id="productId" type="hidden" />
-        <label class="image-uploader" for="productImageInput">
-          <img id="productImagePreview" alt="商品預覽" />
-          <span id="imageUploadHint">拍照或從相簿選擇</span>
-          <input id="productImageInput" type="file" accept="image/jpeg,image/png,image/webp" />
-        </label>
-        <input id="productImageUrl" type="hidden" />
-        <div class="upload-progress" id="uploadProgress" hidden>正在壓縮並上傳圖片…</div>
+        <section class="product-images-editor" aria-labelledby="productImagesLabel">
+          <div class="product-images-heading"><span id="productImagesLabel">商品照片 *</span><small id="productImageCount">0 / 10 張</small></div>
+          <div class="product-image-list" id="productImageList"></div>
+          <label class="image-uploader" for="productImageInput">
+            <span id="imageUploadHint">＋ 拍照或從相簿選擇（最多 10 張）</span>
+            <input id="productImageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+          </label>
+          <div class="upload-progress" id="uploadProgress" hidden>正在壓縮並上傳圖片…</div>
+          <small class="field-help">第一張會作為商品封面；可將其他照片設為封面或刪除。</small>
+        </section>
 
         <label class="field"><span>商品名稱 *</span><input id="productName" required maxlength="100" placeholder="例如：矮袋鼠露營鑰匙圈" /></label>
-        <label class="field"><span>分類 *</span><input id="productCategory" required maxlength="30" list="categorySuggestions" placeholder="可選擇既有分類或輸入新分類" /></label>
-        <datalist id="categorySuggestions"><option value="吊飾"></option><option value="文具"></option><option value="收納"></option><option value="玩偶"></option><option value="生活小物"></option></datalist>
+        <label class="field"><span>分類 *</span><select id="productCategory" required></select></label>
+        <label class="field new-category-field" id="newCategoryField" hidden><span>新增分類名稱 *</span><input id="productNewCategory" maxlength="30" placeholder="輸入後會記住並加入下拉選單" /></label>
+        <label class="field"><span>庫存數量 *</span><input id="productStockQuantity" required type="number" min="0" max="999999" step="1" inputmode="numeric" placeholder="例如：10" /><small class="field-help">庫存為 0 時會自動下架；增加庫存後仍可自行選擇是否重新上架。</small></label>
+        <label class="field"><span>款式（選填）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="例如：QUOKKA、BOBO（用逗號或換行分隔）"></textarea><small class="field-help">同一商品有多個角色、顏色或尺寸，且售價相同時才填寫；只有一種款式可留白，不同售價或不同販售狀態請分開建立商品。</small></label>
         <section class="product-price-calculator">
           <label class="field"><span>韓幣售價</span><input id="productKrwPrice" type="number" min="0" step="1" inputmode="numeric" placeholder="輸入後自動計算台幣售價" /></label>
           <div class="calculator-rule"><span>共用費率 <b id="productExchangeRatePreview">—</b></span><span>固定加價 <b id="productFixedMarkupPreview">—</b></span></div>
           <label class="field"><span>台幣售價 *</span><input id="productTwdPrice" required type="number" min="1" step="1" inputmode="numeric" placeholder="例如：350" /></label>
           <div class="price-preview">前台販售價格：<strong id="adminTwdPreview">NT$0</strong></div>
         </section>
-        <label class="field"><span>款式（選填）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="例如：QUOKKA、BOBO（用逗號或換行分隔）"></textarea><small class="field-help">同一商品有多個角色、顏色或尺寸，且售價相同時才填寫；只有一種款式可留白，不同售價或不同販售狀態請分開建立商品。</small></label>
         <label class="field"><span>商品說明</span><textarea id="productDescription" rows="3" maxlength="500" placeholder="尺寸、材質或現場注意事項"></textarea></label>
         <label class="field"><span>排序</span><input id="productSortOrder" type="number" step="1" min="0" /></label>
         <label class="field"><span>販售狀態</span><select id="productStatus"><option value="active">上架</option><option value="inactive">缺貨</option></select><small class="field-help">缺貨商品會立即從前台隱藏，但仍保留在後台，可隨時重新上架。</small></label>

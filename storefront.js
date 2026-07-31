@@ -64,6 +64,11 @@ function bindEvents() {
     state.search = event.target.value.trim();
     renderCatalog();
   });
+  document.getElementById("dialogImageThumbnails").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-dialog-image]");
+    if (!button || !state.selectedProduct) return;
+    selectDialogImage(state.selectedProduct, Number(button.dataset.dialogImage));
+  });
   document.getElementById("checkoutItems").addEventListener("click", (event) => {
     const button = event.target.closest("[data-remove]");
     if (!button) return;
@@ -218,8 +223,24 @@ function renderCatalog() {
 }
 
 function productImage(product) {
-  if (product.imageUrl) return `<img src="${escapeAttr(product.imageUrl)}" alt="${escapeAttr(product.name)}" loading="lazy" />`;
+  const imageUrl = productImageUrls(product)[0];
+  if (imageUrl) return `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(product.name)}" loading="lazy" />`;
   return `<img src="data:image/svg+xml,${encodeURIComponent(placeholderSvg())}" alt="${escapeAttr(product.name)}" />`;
+}
+
+function productImageUrls(product) {
+  const urls = Array.isArray(product?.imageUrls) ? product.imageUrls : [];
+  return [...new Set([...urls, product?.imageUrl].map((url) => String(url || "").trim()).filter(Boolean))].slice(0, 10);
+}
+
+function selectDialogImage(product, index) {
+  const urls = productImageUrls(product);
+  const selectedIndex = Math.max(0, Math.min(index, urls.length - 1));
+  const selectedUrl = urls[selectedIndex] || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
+  const image = document.getElementById("dialogImage");
+  image.src = selectedUrl;
+  image.alt = urls.length > 1 ? `${product.name}，照片 ${selectedIndex + 1}` : product.name;
+  document.querySelectorAll("[data-dialog-image]").forEach((button) => button.classList.toggle("active", Number(button.dataset.dialogImage) === selectedIndex));
 }
 
 function placeholderSvg() {
@@ -231,9 +252,9 @@ function openProduct(id) {
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
   state.selectedProduct = product;
-  const image = document.getElementById("dialogImage");
-  image.src = product.imageUrl || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
-  image.alt = product.name;
+  const imageUrls = productImageUrls(product);
+  document.getElementById("dialogImageThumbnails").innerHTML = imageUrls.length > 1 ? imageUrls.map((url, index) => `<button type="button" data-dialog-image="${index}" aria-label="查看第 ${index + 1} 張照片"><img src="${escapeAttr(url)}" alt="" /></button>`).join("") : "";
+  selectDialogImage(product, 0);
   document.getElementById("dialogCategory").textContent = product.category || "韓國小物";
   document.getElementById("dialogName").textContent = product.name;
   document.getElementById("dialogTwd").textContent = `售價 NT$${formatNumber(product.priceTwd)}`;
@@ -306,7 +327,7 @@ function renderCheckout() {
   document.getElementById("checkoutItems").innerHTML = state.cart.map((item, index) => {
     const product = state.products.find((entry) => entry.id === item.productId);
     if (!product) return "";
-    const image = product.imageUrl || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
+    const image = productImageUrls(product)[0] || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
     return `<div class="checkout-item"><img src="${escapeAttr(image)}" alt="" /><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(item.variant || "單一款式")}・${item.qty} 件・NT$${formatNumber(Number(product.priceTwd || 0) * item.qty)}</small></div><button class="remove-item" type="button" data-remove="${index}">移除</button></div>`;
   }).join("");
   const totals = getTotals();

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="../style.css" />
+    <link rel="stylesheet" href="../admin.css" />
+    <title>商品編輯介面檢查</title>
+  </head>
+  <body class="admin-page">
+    <dialog class="editor-dialog" open>
+      <div class="checkout-header">
+        <div><p class="eyebrow">PRODUCT EDITOR</p><h2>編輯商品</h2></div>
+        <button class="dialog-close" type="button" aria-label="關閉">×</button>
+      </div>
+      <form id="productForm">
+        <section class="product-images-editor" aria-labelledby="previewImagesLabel">
+          <div class="product-images-heading"><span id="previewImagesLabel">商品照片 *</span><small>3 / 10 張</small></div>
+          <div class="product-image-list">
+            <article class="product-image-item"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Crect width='400' height='400' fill='%23d9c19e'/%3E%3Ccircle cx='200' cy='190' r='105' fill='%23866b4c'/%3E%3C/svg%3E" alt="商品照片 1" /><b>封面</b><button class="image-remove" type="button">×</button></article>
+            <article class="product-image-item"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Crect width='400' height='400' fill='%23c9dfe7'/%3E%3Ccircle cx='200' cy='200' r='115' fill='%236fa1b3'/%3E%3C/svg%3E" alt="商品照片 2" /><button type="button" data-image-cover="1">設為封面</button><button class="image-remove" type="button">×</button></article>
+            <article class="product-image-item"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Crect width='400' height='400' fill='%23ead9d3'/%3E%3Ccircle cx='200' cy='200' r='115' fill='%23c88c79'/%3E%3C/svg%3E" alt="商品照片 3" /><button type="button" data-image-cover="2">設為封面</button><button class="image-remove" type="button">×</button></article>
+          </div>
+          <label class="image-uploader"><span>＋ 拍照或從相簿選擇</span><input type="file" multiple /></label>
+          <small class="field-help">第一張會作為商品封面；可將其他照片設為封面或刪除。</small>
+        </section>
+        <label class="field"><span>商品名稱 *</span><input value="橡皮擦組＋棉花糖外殼吊飾" /></label>
+        <label class="field"><span>分類 *</span><select><option selected>棒球系列</option><option>吊飾</option><option>＋ 新增分類</option></select></label>
+        <label class="field"><span>庫存數量 *</span><input type="number" value="10" /><small class="field-help">庫存為 0 時會自動下架；增加庫存後仍可自行選擇是否重新上架。</small></label>
+        <label class="field"><span>款式（選填）</span><textarea rows="2">QUOKKA、BOBO</textarea></label>
+        <section class="product-price-calculator">
+          <label class="field"><span>韓幣售價</span><input type="number" value="11000" /></label>
+          <div class="calculator-rule"><span>共用費率 <b>0.025</b></span><span>固定加價 <b>NT$50</b></span></div>
+          <label class="field"><span>台幣售價 *</span><input type="number" value="325" /></label>
+          <div class="price-preview">前台販售價格：<strong>NT$325</strong></div>
+        </section>
+        <label class="field"><span>商品說明</span><textarea rows="3">橡皮擦樣式為隨機 8–10 款</textarea></label>
+        <label class="field"><span>排序</span><input type="number" value="1" /></label>
+        <label class="field"><span>販售狀態</span><select><option selected>上架</option><option>缺貨</option></select></label>
+        <button class="primary-button" type="button">儲存商品</button>
+      </form>
+    </dialog>
+  </body>
+</html>

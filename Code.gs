@@ -21,6 +21,8 @@ var PRODUCT_HEADERS_ = [
   "createdAt",
   "updatedAt",
   "priceTwd",
+  "stockQuantity",
+  "imageUrlsJson",
 ];
 
 var ORDER_HEADERS_ = [
@@ -91,6 +93,8 @@ var LINE_EVENT_HEADERS_ = [
 ];
 
 var SETTING_HEADERS_ = ["key", "value", "label"];
+var PUBLIC_CATALOG_CACHE_KEY_ = "public-catalog-v2";
+var PUBLIC_CATALOG_CACHE_SECONDS_ = 300;
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
   fixedMarkupTwd: 0,
@@ -205,13 +209,20 @@ function setupQuokkaPreorder() {
 }
 
 function handleReadPublicCatalog_() {
+  var cached = readPublicCatalogCache_();
+  if (cached) return json_(cached);
+
+  var lock = LockService.getScriptLock();
   try {
-    setupQuokkaPreorder();
-    var products = readProducts_().filter(function (product) {
+    lock.waitLock(10000);
+    cached = readPublicCatalogCache_();
+    if (cached) return json_(cached);
+
+    var settings = readSettings_();
+    var products = readProducts_(settings).filter(function (product) {
       return product.active === true;
     });
-    var settings = readSettings_();
-    return json_({
+    var payload = {
       ok: true,
       products: products,
       settings: {
@@ -220,10 +231,50 @@ function handleReadPublicCatalog_() {
         saleClosedNotice: settings.saleClosedNotice,
         depositPercent: settings.depositPercent,
       },
-    });
+    };
+    writePublicCatalogCache_(payload);
+    return json_(payload);
   } catch (error) {
     console.error(error);
     return json_({ ok: false, error: "CATALOG_UNAVAILABLE" });
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (error) {
+      // waitLock 失敗時沒有鎖可釋放。
+    }
+  }
+}
+
+function readPublicCatalogCache_() {
+  try {
+    var cached = CacheService.getScriptCache().get(
+      PUBLIC_CATALOG_CACHE_KEY_,
+    );
+    return cached ? JSON.parse(cached) : null;
+  } catch (error) {
+    console.warn("Public catalog cache read failed", error);
+    return null;
+  }
+}
+
+function writePublicCatalogCache_(payload) {
+  try {
+    CacheService.getScriptCache().put(
+      PUBLIC_CATALOG_CACHE_KEY_,
+      JSON.stringify(payload),
+      PUBLIC_CATALOG_CACHE_SECONDS_,
+    );
+  } catch (error) {
+    console.warn("Public catalog cache write failed", error);
+  }
+}
+
+function invalidatePublicCatalogCache_() {
+  try {
+    CacheService.getScriptCache().remove(PUBLIC_CATALOG_CACHE_KEY_);
+  } catch (error) {
+    console.warn("Public catalog cache invalidation failed", error);
   }
 }
 
@@ -2950,15 +3001,18 @@ function handleAdminSaveProduct_(data) {
       product.krwPrice || "",
       product.variants.join("\n"),
       product.description,
-      product.active ? "上架" : "下架",
+      product.active && product.stockQuantity > 0 ? "上架" : "下架",
       product.sortOrder,
       createdAt,
       now,
       product.priceTwd,
+      product.stockQuantity,
+      JSON.stringify(product.imageUrls),
     ];
     if (rowNumber)
       sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).setValues([row]);
     else sheet.appendRow(row);
+    invalidatePublicCatalogCache_();
     return json_({
       ok: true,
       product: rowToProduct_(row, readSettings_().exchangeRate),
@@ -2980,11 +3034,15 @@ function handleAdminToggleProduct_(data) {
     var sheet = spreadsheet_().getSheetByName("Products");
     var rowNumber = findProductRow_(sheet, productId);
     if (!rowNumber) throw new Error("PRODUCT_NOT_FOUND");
+    var stockCell = sheet.getRange(rowNumber, 13).getValue();
+    if (data.active && stockCell !== "" && number_(stockCell) <= 0)
+      throw new Error("OUT_OF_STOCK");
     sheet.getRange(rowNumber, 8).setValue(data.active ? "上架" : "下架");
     sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
     var row = sheet
       .getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length)
       .getValues()[0];
+    invalidatePublicCatalogCache_();
     return json_({
       ok: true,
       product: rowToProduct_(row, readSettings_().exchangeRate),
@@ -3146,6 +3204,7 @@ function handleAdminSaveSettings_(data) {
         .getRange(2, 1, sheet.getLastRow() - 1, SETTING_HEADERS_.length)
         .clearContent();
     sheet.getRange(2, 1, rows.length, SETTING_HEADERS_.length).setValues(rows);
+    invalidatePublicCatalogCache_();
     return json_({ ok: true, settings: readSettings_() });
   } finally {
     lock.releaseLock();
@@ -3198,6 +3257,20 @@ function validatePreorderFields_(data) {
 
 function validateProduct_(source) {
   source = source || {};
+  var imageUrls = Array.isArray(source.imageUrls) ? source.imageUrls : [];
+  if (!imageUrls.length && source.imageUrl) imageUrls = [source.imageUrl];
+  imageUrls = imageUrls
+    .map(function (value) {
+      return cleanText_(value, 500);
+    })
+    .filter(function (value, index, values) {
+      return value && values.indexOf(value) === index;
+    });
+  if (imageUrls.length < 1 || imageUrls.length > 10)
+    throw new Error("INVALID_PRODUCT");
+  imageUrls.forEach(function (url) {
+    if (!/^https:\/\//i.test(url)) throw new Error("INVALID_PRODUCT");
+  });
   var variants = Array.isArray(source.variants) ? source.variants : [];
   variants = variants
     .map(function (value) {
@@ -3209,18 +3282,25 @@ function validateProduct_(source) {
     id: String(source.id || "").trim(),
     name: cleanText_(source.name, 100),
     category: cleanText_(source.category, 30),
-    imageUrl: cleanText_(source.imageUrl, 500),
+    imageUrl: imageUrls[0],
+    imageUrls: imageUrls,
     krwPrice: Number(source.krwPrice || 0),
     priceTwd: Number(source.priceTwd),
     variants: variants,
     description: cleanText_(source.description, 500),
     active: source.active === true,
     sortOrder: Number(source.sortOrder || 0),
+    stockQuantity: Number(source.stockQuantity),
   };
   if (!product.name || !product.category || !product.imageUrl)
     throw new Error("INVALID_PRODUCT");
-  if (!/^https:\/\//i.test(product.imageUrl))
+  if (
+    !Number.isInteger(product.stockQuantity) ||
+    product.stockQuantity < 0 ||
+    product.stockQuantity > 999999
+  )
     throw new Error("INVALID_PRODUCT");
+  if (product.stockQuantity === 0) product.active = false;
   if (
     !Number.isInteger(product.krwPrice) ||
     product.krwPrice < 0 ||
@@ -3242,10 +3322,10 @@ function validateProduct_(source) {
   return product;
 }
 
-function readProducts_() {
+function readProducts_(settings) {
   var sheet = spreadsheet_().getSheetByName("Products");
   if (!sheet || sheet.getLastRow() < 2) return [];
-  var legacyExchangeRate = readSettings_().exchangeRate;
+  var legacyExchangeRate = (settings || readSettings_()).exchangeRate;
   var rows = sheet
     .getRange(2, 1, sheet.getLastRow() - 1, PRODUCT_HEADERS_.length)
     .getValues();
@@ -3271,11 +3351,34 @@ function rowToProduct_(row, legacyExchangeRate) {
       number_(row[4]) *
         number_(legacyExchangeRate || DEFAULT_SETTINGS_.exchangeRate),
     );
+  var imageUrls = [];
+  try {
+    imageUrls = JSON.parse(String(row[13] || "[]"));
+    if (!Array.isArray(imageUrls)) imageUrls = [];
+  } catch (error) {
+    imageUrls = [];
+  }
+  imageUrls = imageUrls
+    .map(function (value) {
+      return String(value || "").trim();
+    })
+    .filter(function (value, index, values) {
+      return value && values.indexOf(value) === index;
+    })
+    .slice(0, 10);
+  var legacyImageUrl = String(row[3] || "").trim();
+  if (legacyImageUrl && imageUrls.indexOf(legacyImageUrl) === -1)
+    imageUrls.unshift(legacyImageUrl);
+  imageUrls = imageUrls.slice(0, 10);
+  var stockQuantity = row[12] === "" || row[12] == null ? null : number_(row[12]);
+  var isActive = String(row[7] || "").trim() === "上架";
+  if (stockQuantity === 0) isActive = false;
   return {
     id: String(row[0] || "").trim(),
     name: String(row[1] || "").trim(),
     category: String(row[2] || "").trim(),
-    imageUrl: String(row[3] || "").trim(),
+    imageUrl: imageUrls[0] || legacyImageUrl,
+    imageUrls: imageUrls,
     krwPrice: number_(row[4]),
     priceTwd: priceTwd,
     variants: String(row[5] || "")
@@ -3285,7 +3388,8 @@ function rowToProduct_(row, legacyExchangeRate) {
       })
       .filter(Boolean),
     description: String(row[6] || "").trim(),
-    active: String(row[7] || "").trim() === "上架",
+    active: isActive,
+    stockQuantity: stockQuantity,
     sortOrder: number_(row[8]),
     createdAt: displayDate_(row[9]),
     updatedAt: displayDate_(row[10]),

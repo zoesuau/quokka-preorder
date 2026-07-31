@@ -2,7 +2,7 @@ const CONFIG = window.QUOKKA_CONFIG || {};
 const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
 const PAYMENT_REPORTED_STATUS = "待確認訂金";
 const ORDER_COMPLETED_STATUS = "訂單已完成";
-const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false };
+const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, editorImageUrls: [] };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
@@ -44,6 +44,8 @@ function bindAdminEvents() {
   document.getElementById("productTwdPrice").addEventListener("input", updateAdminPricePreview);
   document.getElementById("productKrwPrice").addEventListener("input", calculateProductTwdPrice);
   document.getElementById("productImageInput").addEventListener("change", uploadSelectedImage);
+  document.getElementById("productImageList").addEventListener("click", handleEditorImageAction);
+  document.getElementById("productCategory").addEventListener("change", updateNewCategoryField);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
   document.getElementById("passwordForm").addEventListener("submit", changeAdminAccessCode);
@@ -693,31 +695,82 @@ function renderAdminProducts() {
   document.getElementById("activeCount").textContent = adminState.products.filter((product) => product.active).length;
   document.getElementById("totalCount").textContent = adminState.products.length;
   document.getElementById("adminProductList").innerHTML = products.map((product) => `<article class="admin-product-card ${product.active ? "" : "inactive"}">
-    <img src="${escapeAttr(product.imageUrl || demoPlaceholder)}" alt="" />
+    <img src="${escapeAttr(primaryProductImage(product) || demoPlaceholder)}" alt="" />
     <div class="admin-product-info"><div class="admin-product-title"><h3>${escapeHtml(product.name)}</h3><span class="category-label">${escapeHtml(product.category)}</span></div>
-    <p>台幣售價 NT$${formatNumber(product.priceTwd)}</p>
+    <p>台幣售價 NT$${formatNumber(product.priceTwd)}　｜　庫存 ${product.stockQuantity == null ? "未設定" : formatNumber(product.stockQuantity)}</p>
     <div class="admin-card-actions"><button type="button" data-edit="${escapeAttr(product.id)}">編輯</button><button type="button" class="${product.active ? "toggle-on" : "toggle-off"}" data-toggle="${escapeAttr(product.id)}">${product.active ? "上架中" : "缺貨"}</button></div></div>
   </article>`).join("");
   if (!products.length) setAdminStatus("沒有符合條件的商品。");
   else setAdminStatus("", true);
 }
 
+function productImageUrls(product) {
+  const urls = Array.isArray(product?.imageUrls) ? product.imageUrls : [];
+  return [...new Set([...urls, product?.imageUrl].map((url) => String(url || "").trim()).filter(Boolean))].slice(0, 10);
+}
+
+function primaryProductImage(product) {
+  return productImageUrls(product)[0] || "";
+}
+
+function renderEditorImages() {
+  const list = document.getElementById("productImageList");
+  list.innerHTML = adminState.editorImageUrls.map((url, index) => `<article class="product-image-item">
+    <img src="${escapeAttr(url)}" alt="商品照片 ${index + 1}" />
+    ${index === 0 ? '<b>封面</b>' : `<button type="button" data-image-cover="${index}">設為封面</button>`}
+    <button class="image-remove" type="button" data-image-remove="${index}" aria-label="刪除第 ${index + 1} 張照片">×</button>
+  </article>`).join("");
+  document.getElementById("productImageCount").textContent = `${adminState.editorImageUrls.length} / 10 張`;
+  document.getElementById("imageUploadHint").textContent = adminState.editorImageUrls.length >= 10 ? "已達 10 張上限" : "＋ 拍照或從相簿選擇";
+  document.querySelector(".product-images-editor .image-uploader").classList.toggle("is-full", adminState.editorImageUrls.length >= 10);
+}
+
+function handleEditorImageAction(event) {
+  const coverButton = event.target.closest("[data-image-cover]");
+  if (coverButton) {
+    const index = Number(coverButton.dataset.imageCover);
+    const [selected] = adminState.editorImageUrls.splice(index, 1);
+    if (selected) adminState.editorImageUrls.unshift(selected);
+    return renderEditorImages();
+  }
+  const removeButton = event.target.closest("[data-image-remove]");
+  if (!removeButton) return;
+  adminState.editorImageUrls.splice(Number(removeButton.dataset.imageRemove), 1);
+  renderEditorImages();
+}
+
+function updateNewCategoryField() {
+  const isNew = document.getElementById("productCategory").value === "__new__";
+  const field = document.getElementById("newCategoryField");
+  const input = document.getElementById("productNewCategory");
+  field.hidden = !isNew;
+  input.required = isNew;
+  if (isNew) input.focus({ preventScroll: true });
+}
+
 function openEditor(product = null) {
   const categories = [...new Set(adminState.products.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
-  document.getElementById("categorySuggestions").innerHTML = categories.map((category) => `<option value="${escapeAttr(category)}"></option>`).join("");
+  const selectedCategory = product?.category || "";
+  const categorySelect = document.getElementById("productCategory");
+  categorySelect.innerHTML = `<option value="">請選擇分類</option>${categories.map((category) => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join("")}<option value="__new__">＋ 新增分類</option>`;
+  if (selectedCategory && !categories.includes(selectedCategory)) {
+    categorySelect.insertAdjacentHTML("beforeend", `<option value="${escapeAttr(selectedCategory)}">${escapeHtml(selectedCategory)}</option>`);
+  }
   document.getElementById("editorTitle").textContent = product ? "編輯商品" : "新增商品";
   document.getElementById("productId").value = product?.id || "";
   document.getElementById("productName").value = product?.name || "";
-  document.getElementById("productCategory").value = product?.category || "";
+  categorySelect.value = selectedCategory;
+  document.getElementById("productNewCategory").value = "";
+  document.getElementById("productStockQuantity").value = product?.stockQuantity ?? (product ? "" : 1);
   document.getElementById("productKrwPrice").value = product?.krwPrice || "";
   document.getElementById("productTwdPrice").value = product?.priceTwd || "";
   document.getElementById("productVariants").value = Array.isArray(product?.variants) ? product.variants.join(", ") : (product?.variants || "");
   document.getElementById("productDescription").value = product?.description || "";
   document.getElementById("productSortOrder").value = product?.sortOrder ?? adminState.products.length + 1;
   document.getElementById("productStatus").value = product && !product.active ? "inactive" : "active";
-  document.getElementById("productImageUrl").value = product?.imageUrl || "";
-  document.getElementById("productImagePreview").src = product?.imageUrl || demoPlaceholder;
-  document.getElementById("imageUploadHint").textContent = product?.imageUrl ? "點一下更換照片" : "拍照或從相簿選擇";
+  adminState.editorImageUrls = productImageUrls(product);
+  renderEditorImages();
+  updateNewCategoryField();
   updateAdminPricePreview();
   document.getElementById("productEditor").showModal();
 }
@@ -729,6 +782,7 @@ async function handleProductAction(event) {
   if (!toggleButton) return;
   const product = adminState.products.find((item) => item.id === toggleButton.dataset.toggle);
   if (!product) return;
+  if (!product.active && product.stockQuantity === 0) return showToast("庫存為 0，請先編輯商品並增加庫存");
   toggleButton.disabled = true;
   try {
     const result = await adminPost({ action: "adminToggleProduct", productId: product.id, active: !product.active });
@@ -742,26 +796,35 @@ async function handleProductAction(event) {
 }
 
 async function uploadSelectedImage(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
+  const files = [...(event.target.files || [])];
+  if (!files.length) return;
   if (!CONFIG.apiUrl) return showToast("尚未設定 GAS API");
+  const remaining = 10 - adminState.editorImageUrls.length;
+  if (remaining <= 0) {
+    event.target.value = "";
+    return showToast("每個商品最多 10 張照片");
+  }
+  const selectedFiles = files.slice(0, remaining);
   adminState.uploadBusy = true;
   document.getElementById("uploadProgress").hidden = false;
   try {
-    const compressed = await compressImage(file, 1200, .82);
-    document.getElementById("productImagePreview").src = compressed.dataUrl;
-    const result = await adminPost({ action: "adminUploadProductImage", fileName: file.name, mimeType: "image/jpeg", base64Data: compressed.dataUrl.split(",")[1] });
-    if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
-    document.getElementById("productImageUrl").value = result.imageUrl;
-    document.getElementById("productImagePreview").src = result.imageUrl;
-    document.getElementById("imageUploadHint").textContent = "點一下更換照片";
-    showToast("圖片上傳完成");
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const file = selectedFiles[index];
+      document.getElementById("uploadProgress").textContent = `正在上傳第 ${index + 1} / ${selectedFiles.length} 張照片…`;
+      const compressed = await compressImage(file, 1200, .82);
+      const result = await adminPost({ action: "adminUploadProductImage", fileName: file.name, mimeType: "image/jpeg", base64Data: compressed.dataUrl.split(",")[1] });
+      if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
+      adminState.editorImageUrls.push(result.imageUrl);
+      renderEditorImages();
+    }
+    showToast(files.length > remaining ? `已上傳 ${selectedFiles.length} 張；每個商品最多 10 張` : `${selectedFiles.length} 張照片上傳完成`);
   } catch (error) {
     console.error(error);
     showToast("圖片上傳失敗，請換一張再試");
   } finally {
     adminState.uploadBusy = false;
     document.getElementById("uploadProgress").hidden = true;
+    document.getElementById("uploadProgress").textContent = "正在壓縮並上傳圖片…";
     event.target.value = "";
   }
 }
@@ -773,19 +836,24 @@ async function saveProduct(event) {
   button.disabled = true;
   button.textContent = "儲存中…";
   try {
+    const categorySelection = document.getElementById("productCategory").value;
+    const stockValue = document.getElementById("productStockQuantity").value;
     const product = {
       id: document.getElementById("productId").value,
       name: document.getElementById("productName").value.trim(),
-      category: document.getElementById("productCategory").value.trim(),
-      imageUrl: document.getElementById("productImageUrl").value.trim(),
+      category: (categorySelection === "__new__" ? document.getElementById("productNewCategory").value : categorySelection).trim(),
+      imageUrl: adminState.editorImageUrls[0] || "",
+      imageUrls: [...adminState.editorImageUrls],
+      stockQuantity: Number(stockValue),
       krwPrice: Number(document.getElementById("productKrwPrice").value || 0),
       priceTwd: Number(document.getElementById("productTwdPrice").value),
       variants: parseVariants(document.getElementById("productVariants").value),
       description: document.getElementById("productDescription").value.trim(),
       sortOrder: Number(document.getElementById("productSortOrder").value || 0),
-      active: document.getElementById("productStatus").value === "active",
+      active: document.getElementById("productStatus").value === "active" && Number(stockValue) > 0,
     };
     if (!product.imageUrl) throw new Error("IMAGE_REQUIRED");
+    if (!product.category) throw new Error("CATEGORY_REQUIRED");
     const result = await adminPost({ action: "adminSaveProduct", product });
     if (!result.ok) throw new Error(result.error || "SAVE_FAILED");
     const index = adminState.products.findIndex((item) => item.id === result.product.id);
@@ -796,7 +864,7 @@ async function saveProduct(event) {
     renderAdminProducts();
     showToast("商品已儲存");
   } catch (error) {
-    showToast(error.message === "IMAGE_REQUIRED" ? "請先上傳商品圖片" : "商品儲存失敗，請檢查欄位");
+    showToast(error.message === "IMAGE_REQUIRED" ? "請先上傳至少一張商品照片" : error.message === "CATEGORY_REQUIRED" ? "請選擇或輸入分類" : "商品儲存失敗，請檢查欄位");
   } finally {
     button.disabled = false;
     button.textContent = "儲存商品";
