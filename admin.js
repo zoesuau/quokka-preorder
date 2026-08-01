@@ -47,6 +47,10 @@ function bindAdminEvents() {
   document.getElementById("productImageList").addEventListener("click", handleEditorImageAction);
   document.getElementById("productCategory").addEventListener("change", updateNewCategoryField);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
+  document.getElementById("stockEditorForm").addEventListener("submit", saveProductStock);
+  document.getElementById("stockEditorClose").addEventListener("click", () => document.getElementById("stockEditorDialog").close());
+  document.querySelector(".stock-quick-options").addEventListener("click", selectQuickStockQuantity);
+  document.getElementById("stockEditorQuantity").addEventListener("input", updateQuickStockSelection);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
   document.getElementById("passwordForm").addEventListener("submit", changeAdminAccessCode);
   ["paymentDeadlineHours", "paymentGraceHours"].forEach((id) => document.getElementById(id).addEventListener("input", updatePaymentRulePreview));
@@ -696,9 +700,18 @@ function renderAdminProducts() {
   document.getElementById("totalCount").textContent = adminState.products.length;
   document.getElementById("adminProductList").innerHTML = products.map((product) => `<article class="admin-product-card ${product.active ? "" : "inactive"}">
     <img src="${escapeAttr(primaryProductImage(product) || demoPlaceholder)}" alt="" />
-    <div class="admin-product-info"><div class="admin-product-title"><h3>${escapeHtml(product.name)}</h3><span class="category-label">${escapeHtml(product.category)}</span></div>
-    <p>台幣售價 NT$${formatNumber(product.priceTwd)}　｜　庫存 ${product.stockQuantity == null ? "未設定" : formatNumber(product.stockQuantity)}</p>
-    <div class="admin-card-actions"><button type="button" data-edit="${escapeAttr(product.id)}">編輯</button><button type="button" class="${product.active ? "toggle-on" : "toggle-off"}" data-toggle="${escapeAttr(product.id)}">${product.active ? "上架中" : "缺貨"}</button></div></div>
+    <div class="admin-product-info">
+      <div class="admin-product-meta">
+        <button class="stock-button ${product.stockQuantity === 0 ? "sold-out" : ""}" type="button" data-stock="${escapeAttr(product.id)}" aria-label="調整 ${escapeAttr(product.name)} 的庫存"><span>庫存 <strong>${product.stockQuantity == null ? "未設定" : formatNumber(product.stockQuantity)}</strong></span></button>
+        <span class="category-label">${escapeHtml(product.category)}</span>
+        <span class="admin-product-price">NT$${formatNumber(product.priceTwd)}</span>
+        <button class="admin-product-edit" type="button" data-edit="${escapeAttr(product.id)}"><span>編輯</span></button>
+      </div>
+      <div class="admin-product-primary">
+        <h3>${escapeHtml(product.name)}</h3>
+        <label class="admin-status-switch"><span>${product.active ? "上架中" : "已下架"}</span><input type="checkbox" data-toggle="${escapeAttr(product.id)}" aria-label="${product.active ? "下架" : "上架"} ${escapeAttr(product.name)}" ${product.active ? "checked" : ""} /><i aria-hidden="true"></i></label>
+      </div>
+    </div>
   </article>`).join("");
   if (!products.length) setAdminStatus("沒有符合條件的商品。");
   else setAdminStatus("", true);
@@ -778,21 +791,83 @@ function openEditor(product = null) {
 async function handleProductAction(event) {
   const editButton = event.target.closest("[data-edit]");
   if (editButton) return openEditor(adminState.products.find((product) => product.id === editButton.dataset.edit));
+  const stockButton = event.target.closest("[data-stock]");
+  if (stockButton) return openStockEditor(adminState.products.find((product) => product.id === stockButton.dataset.stock));
   const toggleButton = event.target.closest("[data-toggle]");
   if (!toggleButton) return;
   const product = adminState.products.find((item) => item.id === toggleButton.dataset.toggle);
   if (!product) return;
-  if (!product.active && product.stockQuantity === 0) return showToast("庫存為 0，請先編輯商品並增加庫存");
+  if (!product.active && product.stockQuantity === 0) {
+    toggleButton.checked = false;
+    return showToast("庫存為 0，請先增加庫存");
+  }
   toggleButton.disabled = true;
   try {
     const result = await adminPost({ action: "adminToggleProduct", productId: product.id, active: !product.active });
     if (!result.ok) throw new Error(result.error || "TOGGLE_FAILED");
-    product.active = result.product.active;
+    updateProductInState(result.product);
     renderAdminProducts();
-    showToast(product.active ? "商品已上架" : "商品已設為缺貨");
+    showToast(result.product.active ? "商品已上架" : "商品已下架");
   } catch (error) {
+    toggleButton.checked = product.active;
     showToast("更新失敗，請再試一次");
   } finally { toggleButton.disabled = false; }
+}
+
+function openStockEditor(product) {
+  if (!product) return;
+  document.getElementById("stockEditorProductId").value = product.id;
+  document.getElementById("stockEditorProduct").textContent = product.name;
+  document.getElementById("stockEditorQuantity").value = product.stockQuantity ?? "";
+  updateQuickStockSelection();
+  document.getElementById("stockEditorDialog").showModal();
+  document.getElementById("stockEditorQuantity").focus({ preventScroll: true });
+}
+
+function selectQuickStockQuantity(event) {
+  const button = event.target.closest("[data-stock-quick]");
+  if (!button) return;
+  document.getElementById("stockEditorQuantity").value = button.dataset.stockQuick;
+  updateQuickStockSelection();
+}
+
+function updateQuickStockSelection() {
+  const value = document.getElementById("stockEditorQuantity").value;
+  document.querySelectorAll("[data-stock-quick]").forEach((button) => {
+    const selected = button.dataset.stockQuick === value;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+
+async function saveProductStock(event) {
+  event.preventDefault();
+  const productId = document.getElementById("stockEditorProductId").value;
+  const stockValue = document.getElementById("stockEditorQuantity").value;
+  const stockQuantity = Number(stockValue);
+  if (stockValue === "") return showToast("請輸入庫存數量");
+  if (!Number.isInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > 999999) return showToast("請輸入 0～999999 的整數庫存");
+  const button = document.getElementById("saveProductStock");
+  button.disabled = true;
+  button.textContent = "儲存中…";
+  try {
+    const result = await adminPost({ action: "adminUpdateProductStock", productId, stockQuantity });
+    if (!result.ok) throw new Error(result.error || "STOCK_UPDATE_FAILED");
+    updateProductInState(result.product);
+    document.getElementById("stockEditorDialog").close();
+    renderAdminProducts();
+    showToast(stockQuantity === 0 ? "庫存已設為 0，商品已下架" : `庫存已更新為 ${formatNumber(stockQuantity)}`);
+  } catch (error) {
+    showToast("庫存更新失敗，請再試一次");
+  } finally {
+    button.disabled = false;
+    button.textContent = "儲存庫存";
+  }
+}
+
+function updateProductInState(product) {
+  const index = adminState.products.findIndex((item) => item.id === product.id);
+  if (index >= 0) adminState.products[index] = { ...adminState.products[index], ...product };
 }
 
 async function uploadSelectedImage(event) {

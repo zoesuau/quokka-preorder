@@ -133,6 +133,7 @@ test("公開讀取不再執行 setup，商品與設定更新會清除快取", ()
   [
     "handleAdminSaveProduct_",
     "handleAdminToggleProduct_",
+    "handleAdminUpdateProductStock_",
     "handleAdminSaveSettings_",
   ].forEach((name) => {
     assert.match(

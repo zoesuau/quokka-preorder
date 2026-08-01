@@ -229,6 +229,8 @@ function doPost(e) {
       return handleAdminSendMallExpiryReminder_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
+    if (action === "adminUpdateProductStock")
+      return handleAdminUpdateProductStock_(data);
     if (action === "adminUploadProductImage")
       return handleAdminUploadProductImage_(data);
     if (action === "adminSaveSettings") return handleAdminSaveSettings_(data);
@@ -4188,6 +4190,43 @@ function handleAdminToggleProduct_(data) {
     if (data.active && stockCell !== "" && number_(stockCell) <= 0)
       throw new Error("OUT_OF_STOCK");
     sheet.getRange(rowNumber, 8).setValue(data.active ? "上架" : "下架");
+    sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
+    var row = sheet
+      .getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length)
+      .getValues()[0];
+    invalidatePublicCatalogCache_();
+    return json_({
+      ok: true,
+      product: rowToProduct_(row, readSettings_().exchangeRate),
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleAdminUpdateProductStock_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var productId = String(data.productId || "").trim();
+  if (data.stockQuantity === "" || data.stockQuantity == null)
+    throw new Error("INVALID_PRODUCT");
+  var stockQuantity = Number(data.stockQuantity);
+  if (
+    !productId ||
+    !Number.isInteger(stockQuantity) ||
+    stockQuantity < 0 ||
+    stockQuantity > 999999
+  )
+    throw new Error("INVALID_PRODUCT");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Products");
+    var rowNumber = findProductRow_(sheet, productId);
+    if (!rowNumber) throw new Error("PRODUCT_NOT_FOUND");
+    sheet.getRange(rowNumber, 13).setValue(stockQuantity);
+    if (stockQuantity === 0)
+      sheet.getRange(rowNumber, 8).setValue("下架");
     sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
     var row = sheet
       .getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length)

@@ -56,4 +56,58 @@ test("超過 10 張照片會被拒絕", () => {
   }), /INVALID_PRODUCT/);
 });
 
+function createStockUpdateHarness(initialStatus = "上架") {
+  const row = ["p1", "測試商品", "吊飾", "https://example.com/cover.jpg", 1000, "", "", initialStatus, 1, "created", "updated", 100, 9, "[]"];
+  const sheet = {
+    getRange(rowNumber, column, rowCount, columnCount) {
+      assert.equal(rowNumber, 2);
+      if (columnCount) {
+        assert.equal(column, 1);
+        assert.equal(columnCount, context.PRODUCT_HEADERS_.length);
+        return { getValues: () => [row.slice()] };
+      }
+      return {
+        getValue: () => row[column - 1],
+        setValue: (value) => { row[column - 1] = value; },
+      };
+    },
+  };
+  let cacheInvalidations = 0;
+  context.requireAdmin_ = () => {};
+  context.LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) };
+  context.setupQuokkaPreorder = () => {};
+  context.spreadsheet_ = () => ({ getSheetByName: () => sheet });
+  context.findProductRow_ = () => 2;
+  context.formatDateTime_ = () => "now";
+  context.invalidatePublicCatalogCache_ = () => { cacheInvalidations += 1; };
+  context.readSettings_ = () => ({ exchangeRate: 0.022 });
+  context.rowToProduct_ = (savedRow) => ({ id: savedRow[0], active: savedRow[7] === "上架", stockQuantity: savedRow[12] });
+  context.json_ = (payload) => payload;
+  return { row, getCacheInvalidations: () => cacheInvalidations };
+}
+
+test("卡片庫存設為 0 時同步下架並清除公開目錄快取", () => {
+  const harness = createStockUpdateHarness("上架");
+  const result = context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: 0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.product.stockQuantity, 0);
+  assert.equal(result.product.active, false);
+  assert.equal(harness.row[7], "下架");
+  assert.equal(harness.getCacheInvalidations(), 1);
+});
+
+test("卡片增加庫存時保留原本下架狀態", () => {
+  createStockUpdateHarness("下架");
+  const result = context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: 5 });
+  assert.equal(result.product.stockQuantity, 5);
+  assert.equal(result.product.active, false);
+});
+
+test("卡片庫存拒絕負數與小數", () => {
+  createStockUpdateHarness();
+  assert.throws(() => context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: "" }), /INVALID_PRODUCT/);
+  assert.throws(() => context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: -1 }), /INVALID_PRODUCT/);
+  assert.throws(() => context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: 1.5 }), /INVALID_PRODUCT/);
+});
+
 console.log(`\n${passed} product inventory tests passed.`);

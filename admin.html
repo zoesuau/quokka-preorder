@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260801-product-inventory" />
-    <link rel="stylesheet" href="admin.css?v=20260801-product-inventory" />
+    <link rel="stylesheet" href="admin.css?v=20260801-direct-product-controls" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260801-product-inventory" defer></script>
+    <script src="admin.js?v=20260801-direct-product-controls" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -85,7 +85,7 @@
           <span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></span>
           <input id="productSearch" type="search" aria-label="搜尋商品名稱或分類" placeholder="商品名稱或分類" />
         </label>
-        <select id="statusFilter" aria-label="上架狀態"><option value="all">全部狀態</option><option value="active">上架中</option><option value="inactive">缺貨</option></select>
+        <select id="statusFilter" aria-label="上架狀態"><option value="all">全部狀態</option><option value="active">上架中</option><option value="inactive">已下架</option></select>
       </div>
 
       <div class="status-panel" id="adminStatus">正在確認管理員身分…</div>
@@ -211,6 +211,29 @@
           <button id="orderEditorClose" type="button">返回</button>
           <button class="status-confirm-submit" id="orderEditorSubmit" type="submit">確認修改並通知</button>
         </div>
+      </form>
+    </dialog>
+    <dialog class="stock-editor-dialog" id="stockEditorDialog" aria-labelledby="stockEditorTitle">
+      <form id="stockEditorForm">
+        <div class="checkout-header">
+          <div><p class="eyebrow">INVENTORY</p><h2 id="stockEditorTitle">調整庫存</h2></div>
+          <button class="dialog-close" id="stockEditorClose" type="button" aria-label="關閉庫存調整視窗">×</button>
+        </div>
+        <p class="stock-editor-product" id="stockEditorProduct"></p>
+        <input id="stockEditorProductId" type="hidden" />
+        <fieldset class="stock-quick-options">
+          <legend>常用數量</legend>
+          <div>
+            <button type="button" data-stock-quick="0">0</button>
+            <button type="button" data-stock-quick="1">1</button>
+            <button type="button" data-stock-quick="2">2</button>
+            <button type="button" data-stock-quick="3">3</button>
+            <button type="button" data-stock-quick="4">4</button>
+            <button type="button" data-stock-quick="5">5</button>
+          </div>
+        </fieldset>
+        <label class="field stock-custom-field"><span>或直接輸入庫存</span><input id="stockEditorQuantity" type="number" min="0" max="999999" step="1" inputmode="numeric" required /><small class="field-help">設為 0 會自動下架；增加庫存後不會自動上架。</small></label>
+        <button class="primary-button" id="saveProductStock" type="submit">儲存庫存</button>
       </form>
     </dialog>
     <div class="toast" id="toast" role="status"></div>
