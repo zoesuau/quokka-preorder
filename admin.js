@@ -2,13 +2,12 @@ const CONFIG = window.QUOKKA_CONFIG || {};
 const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
 const PAYMENT_REPORTED_STATUS = "待確認訂金";
 const ORDER_COMPLETED_STATUS = "訂單已完成";
-const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, editorImageUrls: [], editorVariantOptions: [], variantInventoryEnabled: false, variantImageTarget: -1 };
+const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, editorImageUrls: [] };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
 
 async function initAdmin() {
-  document.title = `${CONFIG.brandName || "代購訂購系統"}｜管理後台`;
   bindAdminEvents();
   switchAdminPage(["products", "settings"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "orders");
   const savedSession = sessionStorage.getItem("quokkaAdminSession") || "";
@@ -46,12 +45,6 @@ function bindAdminEvents() {
   document.getElementById("productKrwPrice").addEventListener("input", calculateProductTwdPrice);
   document.getElementById("productImageInput").addEventListener("change", uploadSelectedImage);
   document.getElementById("productImageList").addEventListener("click", handleEditorImageAction);
-  document.getElementById("enableVariantInventory").addEventListener("click", enableVariantInventory);
-  document.getElementById("disableVariantInventory").addEventListener("click", disableVariantInventory);
-  document.getElementById("addVariantOption").addEventListener("click", () => addVariantOption());
-  document.getElementById("variantOptionList").addEventListener("input", updateVariantOptionValue);
-  document.getElementById("variantOptionList").addEventListener("click", handleVariantOptionAction);
-  document.getElementById("variantImageInput").addEventListener("change", uploadVariantImage);
   document.getElementById("productCategory").addEventListener("change", updateNewCategoryField);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("archiveProduct").addEventListener("click", openProductArchiveDialog);
@@ -222,13 +215,13 @@ function downloadCsv(fileName, csv) {
 function renderAdminOrders() {
   const search = document.getElementById("orderSearch").value.trim().toLowerCase();
   const filter = document.getElementById("orderStatusFilter").value;
-  const pending = adminState.orders.filter((order) => ["待收訂金", "待收全款"].includes(normalizeAdminOrderStatus(order.status))).length;
-  document.getElementById("unshippedCount").textContent = `${formatNumber(pending)} 筆待付款`;
+  const pending = adminState.orders.filter((order) => normalizeAdminOrderStatus(order.status) === "待收訂金").length;
+  document.getElementById("unshippedCount").textContent = `${formatNumber(pending)} 筆待收訂金`;
   const orders = adminState.orders.filter((order) => {
     const status = normalizeAdminOrderStatus(order.status);
     if (filter === "active" && ["已取消", ORDER_COMPLETED_STATUS].includes(status)) return false;
     if (!["active", "all"].includes(filter) && status !== filter) return false;
-    const haystack = `${order.orderNo} ${order.customerName} ${order.recipientName || ""} ${order.phone} ${order.pickupStoreCode || ""} ${order.pickupStoreName || ""} ${order.lineDisplayName}`.toLowerCase();
+    const haystack = `${order.orderNo} ${order.customerName} ${order.phone} ${order.lineDisplayName}`.toLowerCase();
     return !search || haystack.includes(search);
   });
   document.getElementById("adminOrderList").innerHTML = orders.length ? orders.map(renderAdminOrderCard).join("") : `<div class="empty-orders">沒有符合條件的訂單。</div>`;
@@ -239,7 +232,6 @@ function normalizeAdminOrderStatus(status) {
 }
 
 function renderAdminOrderCard(order) {
-  if (order.orderFlowMode === "seven_eleven_full") return renderSevenElevenOrderCard(order);
   const normalizedStatus = normalizeAdminOrderStatus(order.status);
   const status = ["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金", IOPEN_MALL_READY_STATUS, ORDER_COMPLETED_STATUS, "已取消"].includes(normalizedStatus) ? normalizedStatus : "待收訂金";
   const statusClass = { "待收訂金": "pending", [PAYMENT_REPORTED_STATUS]: "payment-reported", "已收到訂金": "deposit-received", [IOPEN_MALL_READY_STATUS]: "shipped", [ORDER_COMPLETED_STATUS]: "completed", "已取消": "cancelled" }[status];
@@ -291,44 +283,6 @@ function renderAdminOrderCard(order) {
       ${shortageHistory.length ? renderShortageHistory(order, shortageHistory) : ""}
       ${order.reminderDue ? `<div class="order-reminder"><label>訂金付款提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
       ${order.mallReminderDue ? `<div class="order-reminder"><label>iOPEN Mall 到期前提醒<textarea rows="5" maxlength="500">${escapeHtml(order.mallReminderMessage)}</textarea></label><button type="button" data-mall-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.mallReminderSentAt ? `<p class="reminder-sent">賣場提醒已於 ${escapeHtml(order.mallReminderSentAt)} 送出</p>` : ""}
-    </div>
-  </article>`;
-}
-
-function renderSevenElevenOrderCard(order) {
-  const allowed = ["待收全款", "已收到全款", "待寄出", "已寄出", ORDER_COMPLETED_STATUS, "已取消"];
-  const status = allowed.includes(order.status) ? order.status : "待收全款";
-  const statusClass = { "待收全款": "pending", "已收到全款": "deposit-received", "待寄出": "deposit-received", "已寄出": "shipped", [ORDER_COMPLETED_STATUS]: "completed", "已取消": "cancelled" }[status];
-  const lineAlert = status === "待收全款" && Number(order.lineAlertCount || 0) > 0
-    ? `<section class="line-alert"><strong>LINE 有新訊息待核對</strong><span>${formatNumber(order.lineAlertCount)} 則・${escapeHtml(formatLineMessageType(order.latestLineAlert?.messageType))}・${escapeHtml(order.latestLineAlert?.receivedAt || "")}</span>${order.latestLineAlert?.textPreview ? `<p>${escapeHtml(order.latestLineAlert.textPreview)}</p>` : ""}<small>${order.autoCancelOverdue ? "此訂單已超過處理期限，請確認是否收到全款。" : "核對前系統不會自動取消這筆訂單。"}</small><div class="line-alert-actions"><button type="button" data-line-decision="received" data-line-order="${escapeAttr(order.orderNo)}">全款已入帳</button><button class="${order.autoCancelOverdue ? "is-cancel" : "is-unpaid"}" type="button" data-line-decision="${order.autoCancelOverdue ? "cancel_overdue" : "reviewed"}" data-line-order="${escapeAttr(order.orderNo)}">尚未入帳</button></div></section>`
-    : "";
-  const refund = Number(order.cashRefundDue || 0) > 0
-    ? order.cashRefundedAt
-      ? `<div class="order-reminder"><strong class="refund-complete">已退款 NT $${formatNumber(order.cashRefundDue)}</strong><small>${escapeHtml(order.cashRefundedAt)}</small></div>`
-      : `<div class="order-reminder"><strong class="refund-pending">待退款 NT $${formatNumber(order.cashRefundDue)}</strong><button type="button" data-refund-order="${escapeAttr(order.orderNo)}">確認已退款</button></div>`
-    : "";
-  const items = Array.isArray(order.items) ? order.items : [];
-  const shortageHistory = Array.isArray(order.shortageAdjustments) ? order.shortageAdjustments : [];
-  const canAdjustShortage = ["已收到全款", "待寄出"].includes(status) && items.length > 0;
-  const statusOptions = allowed.map((value) => `<option value="${escapeAttr(value)}" ${status === value ? "selected" : ""}>${value === "已取消" ? "取消訂單" : value}</option>`).join("");
-  return `<article class="admin-order-card ${statusClass}" data-order-card="${escapeAttr(order.orderNo)}">
-    <header><div><span>${escapeHtml(status)}</span><h3>${escapeHtml(order.lineDisplayName || order.recipientName || "未命名")}</h3></div><b>${escapeHtml(order.orderNo)}</b></header>
-    ${canAdjustShortage ? `<div class="order-card-toolbar"><button type="button" data-edit-order="${escapeAttr(order.orderNo)}">取消缺貨品項</button></div>` : ""}
-    <div class="packing-items">${renderAdjustedOrderItems(items, null) || `<pre>${escapeHtml(order.itemsSummary)}</pre>`}</div>
-    <div class="order-summary-box">
-      <div class="order-primary-amount"><span>應付全款</span><strong>NT $${formatNumber(order.orderTotal)}</strong></div>
-      <dl class="customer-details">
-        <div><dt>取件人</dt><dd>${escapeHtml(order.recipientName || order.customerName)}　${escapeHtml(order.phone)}</dd></div>
-        <div><dt>7-11 門市</dt><dd>${escapeHtml(order.pickupStoreCode || "—")}　${escapeHtml(order.pickupStoreName || "—")}</dd></div>
-        <div><dt>商品總額</dt><dd>NT $${formatNumber(order.estimatedTotal)}</dd></div>
-        <div><dt>每單運費</dt><dd>NT $${formatNumber(order.shippingFee)}</dd></div>
-        <div><dt>付款期限</dt><dd class="${order.paymentOverdue ? "refund-pending" : ""}">${escapeHtml(order.paymentDueText || "—")}</dd></div>
-        <div><dt>備註</dt><dd>${escapeHtml(order.note || "無")}</dd></div>
-      </dl>
-      <div class="order-status-actions"><label><span>訂單狀態</span><select data-status-order="${escapeAttr(order.orderNo)}" data-selected-status="${escapeAttr(status)}" ${status === "已取消" ? "disabled" : ""}>${statusOptions}</select></label></div>
-      ${lineAlert}
-      ${shortageHistory.length ? renderShortageHistory(order, shortageHistory) : refund}
-      ${order.reminderDue ? `<div class="order-reminder"><label>全款付款提醒<textarea rows="5" maxlength="500">${escapeHtml(order.reminderMessage)}</textarea></label><button type="button" data-reminder-order="${escapeAttr(order.orderNo)}">確認並送出提醒</button></div>` : order.reminderSentAt ? `<p class="reminder-sent">提醒已於 ${escapeHtml(order.reminderSentAt)} 送出</p>` : ""}
     </div>
   </article>`;
 }
@@ -447,20 +401,14 @@ async function handleOrderAction(event) {
 function renderShortageHistory(order, history) {
   const latest = history[history.length - 1] || {};
   const refundDue = Number(order.cashRefundDue || 0);
-  const isSevenElevenFull = order.orderFlowMode === "seven_eleven_full";
   const paymentLine = refundDue > 0
     ? order.cashRefundedAt
       ? `<strong class="refund-complete">已退現金 NT $${formatNumber(refundDue)}</strong><small>${escapeHtml(order.cashRefundedAt)}</small>`
       : `<strong class="refund-pending">待退現金 NT $${formatNumber(refundDue)}</strong><button type="button" data-refund-order="${escapeAttr(order.orderNo)}">確認已退現金</button>`
-    : isSevenElevenFull
-      ? `<strong>目前無待退款</strong>`
-      : `<strong>後續應付 NT $${formatNumber(order.estimatedBalance)}</strong>`;
-  const amountSummary = isSevenElevenFull
-    ? `商品總額 NT $${formatNumber(order.estimatedTotal)} ＋ 運費 NT $${formatNumber(order.shippingFee)} ＝ 調整後全款 NT $${formatNumber(order.orderTotal)}`
-    : `原總額 NT $${formatNumber(order.originalEstimatedTotal)} → 已扣除 NT $${formatNumber(Number(order.originalEstimatedTotal || 0) - Number(order.estimatedTotal || 0))} → 新總額 NT $${formatNumber(order.estimatedTotal)}`;
+    : `<strong>後續應付 NT $${formatNumber(order.estimatedBalance)}</strong>`;
   return `<section class="shortage-history">
     <div><span>缺貨調整</span><b>${escapeHtml(order.shortageAdjustedAt || latest.adjustedAt || "")}</b></div>
-    <p>${amountSummary}</p>
+    <p>原總額 NT $${formatNumber(order.originalEstimatedTotal)} → 已扣除 NT $${formatNumber(Number(order.originalEstimatedTotal || 0) - Number(order.estimatedTotal || 0))} → 新總額 NT $${formatNumber(order.estimatedTotal)}</p>
     <div class="shortage-payment">${paymentLine}</div>
     <small>${order.shortageNotificationSentAt ? `LINE 通知已於 ${escapeHtml(order.shortageNotificationSentAt)} 送出` : "LINE 通知未送達"}</small>
   </section>`;
@@ -523,24 +471,18 @@ function openOrderEditor(orderNo) {
   const order = adminState.orders.find((entry) => entry.orderNo === orderNo);
   if (!order) return;
   const status = normalizeAdminOrderStatus(order.status);
-  const isSevenElevenFull = order.orderFlowMode === "seven_eleven_full";
-  const allowedStatuses = isSevenElevenFull
-    ? ["已收到全款", "待寄出"]
-    : ["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金", IOPEN_MALL_READY_STATUS];
-  if (!allowedStatuses.includes(status)) return;
+  if (!["待收訂金", PAYMENT_REPORTED_STATUS, "已收到訂金", IOPEN_MALL_READY_STATUS].includes(status)) return;
   document.getElementById("orderEditorOrderNo").value = orderNo;
   document.getElementById("orderEditorRevision").value = Number(order.orderRevision || 0);
-  document.getElementById("orderEditorTitle").textContent = isSevenElevenFull ? "取消缺貨品項" : status === "待收訂金" ? "編輯訂單" : "調整訂單";
+  document.getElementById("orderEditorTitle").textContent = status === "待收訂金" ? "編輯訂單" : "調整訂單";
   document.getElementById("orderEditorMessage").textContent = `${orderNo}｜目前狀態：${status}`;
   const reason = document.getElementById("orderEditorReason");
-  reason.innerHTML = isSevenElevenFull
-    ? `<option value="shortage">採買缺貨</option>`
-    : status === IOPEN_MALL_READY_STATUS
+  reason.innerHTML = status === IOPEN_MALL_READY_STATUS
     ? `<option value="shortage">韓國現場缺貨</option>`
     : status === "已收到訂金"
       ? `<option value="customer_change">顧客變更</option><option value="admin_correction" selected>管理修正</option><option value="shortage">韓國現場缺貨</option>`
       : `<option value="customer_change">顧客變更</option><option value="admin_correction" selected>管理修正</option>`;
-  reason.disabled = isSevenElevenFull || status === IOPEN_MALL_READY_STATUS;
+  reason.disabled = status === IOPEN_MALL_READY_STATUS;
   resetOrderEditorForReason();
   document.getElementById("orderEditorDialog").showModal();
 }
@@ -550,14 +492,11 @@ function resetOrderEditorForReason() {
   if (!order) return;
   const status = normalizeAdminOrderStatus(order.status);
   const shortageMode = getOrderEditorReason() === "shortage";
-  const isSevenElevenFull = order.orderFlowMode === "seven_eleven_full";
   document.getElementById("orderEditorItems").innerHTML = "";
   (order.items || []).forEach((item) => addOrderEditorRow(item));
   document.getElementById("orderEditorAdd").hidden = shortageMode;
   document.getElementById("orderEditorWarning").textContent = shortageMode
-    ? isSevenElevenFull
-      ? "缺貨只能減少或取消原有商品；剩餘商品仍保留每單 NT $60 運費，全數取消才連運費一起列入待退款。"
-      : "缺貨只能減少或取消原有商品；已收訂金不會改寫，系統會計算調整後尾款或待退款。"
+    ? "缺貨只能減少或取消原有商品；已收訂金不會改寫，系統會計算調整後尾款或待退款。"
     : status === "待收訂金"
       ? `尚未收款：儲存後會依新總額重算 ${Number(order.depositPercent || 50)}% 訂金，付款期限維持原訂時間。`
       : status === PAYMENT_REPORTED_STATUS
@@ -622,11 +561,6 @@ function updateOrderEditorPreview() {
   const totalQty = items.reduce((sum, item) => sum + (Number.isFinite(item.qty) ? item.qty : 0), 0);
   const total = items.reduce((sum, item) => sum + orderEditorUnitPrice(order, item) * (Number.isFinite(item.qty) ? item.qty : 0), 0);
   const status = normalizeAdminOrderStatus(order.status);
-  const isSevenElevenFull = order.orderFlowMode === "seven_eleven_full";
-  const adjustedShippingFee = isSevenElevenFull && items.length ? Number(order.shippingFee || 0) : 0;
-  const adjustedFullTotal = total + adjustedShippingFee;
-  const receivedFullPayment = Number(order.depositTotal || order.orderTotal || 0);
-  const fullPaymentRefund = Math.max(receivedFullPayment - adjustedFullTotal, 0);
   const adjustedOrderDeposit = Math.ceil(total * Number(order.depositPercent || 50) / 100);
   const receivedDeposit = status === "待收訂金" ? 0 : Number(order.depositTotal || 0);
   const settlementDeposit = status === "待收訂金" ? adjustedOrderDeposit : receivedDeposit;
@@ -648,15 +582,7 @@ function updateOrderEditorPreview() {
           : "";
   const receivedLabel = status === PAYMENT_REPORTED_STATUS ? "已回報訂金" : "已收訂金";
   const changeLabel = total > Number(order.estimatedTotal || 0) ? "這次增加金額" : total < Number(order.estimatedTotal || 0) ? "這次扣除金額" : "這次金額變動";
-  document.getElementById("orderEditorPreview").innerHTML = isSevenElevenFull
-    ? `<div><span>原訂單全款</span><strong>NT $${formatNumber(order.orderTotal)}</strong></div>
-    <div><span>已收全款</span><strong>NT $${formatNumber(receivedFullPayment)}</strong></div>
-    <div><span>調整後商品總額</span><strong>NT $${formatNumber(total)}</strong></div>
-    <div><span>每單運費</span><strong>NT $${formatNumber(adjustedShippingFee)}</strong></div>
-    <div><span>調整後訂單全款</span><strong>NT $${formatNumber(adjustedFullTotal)}</strong></div>
-    <div><span>待退款</span><strong>NT $${formatNumber(fullPaymentRefund)}</strong></div>
-    ${error ? `<p>${escapeHtml(error)}</p>` : ""}`
-    : `<div><span>原訂單金額</span><strong>NT $${formatNumber(order.estimatedTotal)}</strong></div>
+  document.getElementById("orderEditorPreview").innerHTML = `<div><span>原訂單金額</span><strong>NT $${formatNumber(order.estimatedTotal)}</strong></div>
     <div><span>${receivedLabel}</span><strong>NT $${formatNumber(receivedDeposit)}</strong></div>
     <div><span>商品件數</span><strong>${formatNumber(totalQty)} 件</strong></div>
     <div><span>調整後訂單總額</span><strong>NT $${formatNumber(total)}</strong></div>
@@ -731,14 +657,13 @@ function confirmOrderStatusChange(orderNo, previousStatus, nextStatus) {
   const dialog = document.getElementById("orderStatusConfirmDialog");
   const isCancellation = nextStatus === "已取消";
   const isCompleted = nextStatus === ORDER_COMPLETED_STATUS;
-  const hasNoNotification = isCompleted || nextStatus === "待寄出" || nextStatus === PAYMENT_REPORTED_STATUS;
   document.getElementById("orderStatusConfirmMessage").textContent = `訂單 ${orderNo} 將變更為以下狀態：`;
   document.getElementById("orderStatusPrevious").textContent = previousStatus;
   const next = document.getElementById("orderStatusNext");
   next.textContent = nextStatus;
   next.classList.toggle("is-cancelled", isCancellation);
   const note = document.getElementById("orderStatusConfirmNote");
-  note.textContent = hasNoNotification
+  note.textContent = isCompleted
     ? "確認後將立即更新訂單；此狀態不會發送 LINE 通知。"
     : "確認後將立即更新訂單；並同步發送 LINE 通知。";
   note.classList.toggle("is-warning", isCancellation);
@@ -854,117 +779,6 @@ function renderEditorImages() {
   document.querySelector(".product-images-editor .image-uploader").classList.toggle("is-full", adminState.editorImageUrls.length >= 10);
 }
 
-function createEditorVariantOption(source = {}) {
-  return {
-    id: String(source.id || ""),
-    name: String(source.name || ""),
-    stockQuantity: source.stockQuantity === "" || source.stockQuantity == null ? "" : Number(source.stockQuantity),
-    imageUrl: String(source.imageUrl || ""),
-  };
-}
-
-function renderVariantOptions() {
-  const enabled = adminState.variantInventoryEnabled;
-  document.getElementById("variantOptionsPanel").hidden = !enabled;
-  document.getElementById("legacyVariantField").hidden = enabled;
-  document.getElementById("enableVariantInventory").hidden = enabled;
-  document.getElementById("productStockField").hidden = enabled;
-  document.getElementById("productStockQuantity").required = !enabled;
-  document.getElementById("variantOptionList").innerHTML = adminState.editorVariantOptions.map((option, index) => {
-    const photo = option.imageUrl
-      ? `<img src="${escapeAttr(option.imageUrl)}" alt="${escapeAttr(option.name || `款式 ${index + 1}`)}" />`
-      : '<span>＋ 照片</span>';
-    return `<article class="variant-option-item" data-variant-index="${index}">
-      <button class="variant-photo-button" type="button" data-variant-photo="${index}" aria-label="設定款式照片">${photo}</button>
-      <div class="variant-option-fields">
-        <label><span>款式名稱 *</span><input data-variant-name="${index}" maxlength="50" required value="${escapeAttr(option.name)}" placeholder="例如：黑色" /></label>
-        <label><span>庫存 *</span><input data-variant-stock="${index}" type="number" min="0" max="999999" step="1" inputmode="numeric" required value="${escapeAttr(option.stockQuantity)}" /></label>
-      </div>
-      ${option.imageUrl ? `<button class="variant-photo-remove" type="button" data-variant-photo-remove="${index}">移除照片</button>` : ""}
-      <button class="variant-option-remove" type="button" data-variant-remove="${index}" aria-label="刪除此款式">×</button>
-    </article>`;
-  }).join("");
-  const total = adminState.editorVariantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0);
-  document.getElementById("productStockQuantity").value = enabled ? total : document.getElementById("productStockQuantity").value;
-}
-
-function enableVariantInventory() {
-  const legacyNames = parseVariants(document.getElementById("productVariants").value);
-  adminState.variantInventoryEnabled = true;
-  adminState.editorVariantOptions = legacyNames.length
-    ? legacyNames.map((name) => createEditorVariantOption({ name, stockQuantity: "" }))
-    : [createEditorVariantOption({ stockQuantity: 0 })];
-  renderVariantOptions();
-  if (legacyNames.length) showToast("請為每個舊款式填入庫存；原總庫存不會自動拆分");
-}
-
-function disableVariantInventory() {
-  if (!confirm("改回商品總庫存後，款式的個別庫存與照片不會保留。要繼續嗎？")) return;
-  document.getElementById("productVariants").value = adminState.editorVariantOptions.map((option) => option.name.trim()).filter(Boolean).join(", ");
-  const total = adminState.editorVariantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0);
-  document.getElementById("productStockQuantity").value = total;
-  adminState.variantInventoryEnabled = false;
-  adminState.editorVariantOptions = [];
-  renderVariantOptions();
-}
-
-function addVariantOption() {
-  if (adminState.editorVariantOptions.length >= 30) return showToast("每個商品最多 30 個款式");
-  adminState.editorVariantOptions.push(createEditorVariantOption({ stockQuantity: 0 }));
-  renderVariantOptions();
-  document.querySelector(`[data-variant-name="${adminState.editorVariantOptions.length - 1}"]`)?.focus({ preventScroll: true });
-}
-
-function updateVariantOptionValue(event) {
-  const nameInput = event.target.closest("[data-variant-name]");
-  const stockInput = event.target.closest("[data-variant-stock]");
-  if (!nameInput && !stockInput) return;
-  const index = Number((nameInput || stockInput).dataset[nameInput ? "variantName" : "variantStock"]);
-  if (!adminState.editorVariantOptions[index]) return;
-  if (nameInput) adminState.editorVariantOptions[index].name = nameInput.value;
-  if (stockInput) adminState.editorVariantOptions[index].stockQuantity = stockInput.value;
-  if (stockInput) document.getElementById("productStockQuantity").value = adminState.editorVariantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0);
-}
-
-function handleVariantOptionAction(event) {
-  const photoButton = event.target.closest("[data-variant-photo]");
-  if (photoButton) {
-    adminState.variantImageTarget = Number(photoButton.dataset.variantPhoto);
-    return document.getElementById("variantImageInput").click();
-  }
-  const photoRemove = event.target.closest("[data-variant-photo-remove]");
-  if (photoRemove) {
-    adminState.editorVariantOptions[Number(photoRemove.dataset.variantPhotoRemove)].imageUrl = "";
-    return renderVariantOptions();
-  }
-  const removeButton = event.target.closest("[data-variant-remove]");
-  if (!removeButton) return;
-  adminState.editorVariantOptions.splice(Number(removeButton.dataset.variantRemove), 1);
-  if (!adminState.editorVariantOptions.length) adminState.editorVariantOptions.push(createEditorVariantOption({ stockQuantity: 0 }));
-  renderVariantOptions();
-}
-
-async function uploadVariantImage(event) {
-  const file = event.target.files?.[0];
-  const index = adminState.variantImageTarget;
-  if (!file || index < 0 || !adminState.editorVariantOptions[index]) return;
-  adminState.uploadBusy = true;
-  try {
-    const compressed = await compressImage(file, 1200, .82);
-    const result = await adminPost({ action: "adminUploadProductImage", fileName: file.name, mimeType: "image/jpeg", base64Data: compressed.dataUrl.split(",")[1] });
-    if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
-    adminState.editorVariantOptions[index].imageUrl = result.imageUrl;
-    renderVariantOptions();
-    showToast("款式照片上傳完成");
-  } catch (error) {
-    showToast("款式照片上傳失敗，請換一張再試");
-  } finally {
-    adminState.uploadBusy = false;
-    adminState.variantImageTarget = -1;
-    event.target.value = "";
-  }
-}
-
 function handleEditorImageAction(event) {
   const coverButton = event.target.closest("[data-image-cover]");
   if (coverButton) {
@@ -1018,12 +832,7 @@ function openEditor(product = null) {
     ? "恢復後會先保持下架，確認內容與庫存後再手動上架。"
     : "商品會從日常列表與客人頁面移除，但保留既有訂單資料。";
   adminState.editorImageUrls = productImageUrls(product);
-  adminState.variantInventoryEnabled = Boolean(product?.variantInventoryEnabled && Array.isArray(product?.variantOptions) && product.variantOptions.length);
-  adminState.editorVariantOptions = adminState.variantInventoryEnabled
-    ? product.variantOptions.map(createEditorVariantOption)
-    : [];
   renderEditorImages();
-  renderVariantOptions();
   updateNewCategoryField();
   updateAdminPricePreview();
   document.getElementById("productEditor").showModal();
@@ -1097,11 +906,6 @@ async function handleProductAction(event) {
 
 function openStockEditor(product) {
   if (!product) return;
-  if (product.variantInventoryEnabled) {
-    openEditor(product);
-    showToast("此商品使用款式個別庫存，請在各款式中調整");
-    return;
-  }
   document.getElementById("stockEditorProductId").value = product.id;
   document.getElementById("stockEditorProduct").textContent = product.name;
   document.getElementById("stockEditorQuantity").value = product.stockQuantity ?? "";
@@ -1199,40 +1003,22 @@ async function saveProduct(event) {
   try {
     const categorySelection = document.getElementById("productCategory").value;
     const stockValue = document.getElementById("productStockQuantity").value;
-    const variantOptions = adminState.variantInventoryEnabled
-      ? adminState.editorVariantOptions.map((option) => ({
-          id: option.id,
-          name: option.name.trim(),
-          stockQuantity: Number(option.stockQuantity),
-          imageUrl: option.imageUrl,
-        }))
-      : [];
-    const effectiveStock = adminState.variantInventoryEnabled
-      ? variantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0)
-      : Number(stockValue);
     const product = {
       id: document.getElementById("productId").value,
       name: document.getElementById("productName").value.trim(),
       category: (categorySelection === "__new__" ? document.getElementById("productNewCategory").value : categorySelection).trim(),
       imageUrl: adminState.editorImageUrls[0] || "",
       imageUrls: [...adminState.editorImageUrls],
-      stockQuantity: effectiveStock,
+      stockQuantity: Number(stockValue),
       krwPrice: Number(document.getElementById("productKrwPrice").value || 0),
       priceTwd: Number(document.getElementById("productTwdPrice").value),
       variants: parseVariants(document.getElementById("productVariants").value),
-      variantInventoryEnabled: adminState.variantInventoryEnabled,
-      variantOptions,
       description: document.getElementById("productDescription").value.trim(),
       sortOrder: Number(document.getElementById("productSortOrder").value || 0),
-      active: document.getElementById("productStatus").value === "active" && effectiveStock > 0,
+      active: document.getElementById("productStatus").value === "active" && Number(stockValue) > 0,
     };
     if (!product.imageUrl) throw new Error("IMAGE_REQUIRED");
     if (!product.category) throw new Error("CATEGORY_REQUIRED");
-    if (adminState.variantInventoryEnabled) {
-      if (!variantOptions.length || variantOptions.some((option) => !option.name || !Number.isInteger(option.stockQuantity) || option.stockQuantity < 0)) throw new Error("VARIANT_REQUIRED");
-      const normalizedNames = variantOptions.map((option) => option.name.toLocaleLowerCase());
-      if (new Set(normalizedNames).size !== normalizedNames.length) throw new Error("VARIANT_DUPLICATE");
-    }
     const result = await adminPost({ action: "adminSaveProduct", product });
     if (!result.ok) throw new Error(result.error || "SAVE_FAILED");
     const index = adminState.products.findIndex((item) => item.id === result.product.id);
@@ -1243,8 +1029,7 @@ async function saveProduct(event) {
     renderAdminProducts();
     showToast("商品已儲存");
   } catch (error) {
-    const messages = { IMAGE_REQUIRED: "請先上傳至少一張商品照片", CATEGORY_REQUIRED: "請選擇或輸入分類", VARIANT_REQUIRED: "請填寫每個款式的名稱與 0 以上整數庫存", VARIANT_DUPLICATE: "款式名稱不可重複" };
-    showToast(messages[error.message] || "商品儲存失敗，請檢查欄位");
+    showToast(error.message === "IMAGE_REQUIRED" ? "請先上傳至少一張商品照片" : error.message === "CATEGORY_REQUIRED" ? "請選擇或輸入分類" : "商品儲存失敗，請檢查欄位");
   } finally {
     button.disabled = false;
     button.textContent = "儲存商品";
@@ -1252,9 +1037,7 @@ async function saveProduct(event) {
 }
 
 function fillSettings() {
-  const sevenElevenFull = adminState.settings.orderFlowMode === "seven_eleven_full";
   document.getElementById("saleClosed").checked = Boolean(adminState.settings.saleClosed);
-  document.getElementById("saleClosesAt").value = String(adminState.settings.saleClosesAt || "").replace(" ", "T").slice(0, 16);
   document.getElementById("saleClosedNotice").value = adminState.settings.saleClosedNotice || "本次連線已結束，謝謝大家的支持！";
   document.getElementById("adminPreorderNotice").value = adminState.settings.preorderNotice || "";
   document.getElementById("exchangeRate").value = adminState.settings.exchangeRate || 0.022;
@@ -1263,21 +1046,8 @@ function fillSettings() {
   document.getElementById("paymentReminderHours").value = adminState.settings.paymentReminderHours || 12;
   document.getElementById("paymentDeadlineHours").value = adminState.settings.paymentDeadlineHours || 24;
   document.getElementById("paymentGraceHours").value = adminState.settings.paymentGraceHours ?? 1;
-  document.getElementById("paymentAutoCancelEnabled").checked = adminState.settings.paymentAutoCancelEnabled !== false;
   document.getElementById("iopenMallUrl").value = adminState.settings.iopenMallUrl || "";
   document.getElementById("iopenMallPaymentDays").value = adminState.settings.iopenMallPaymentDays || 8;
-  document.getElementById("depositPercentField").hidden = sevenElevenFull;
-  document.getElementById("mallSettingsSection").hidden = sevenElevenFull;
-  document.getElementById("sevenElevenModeSummary").hidden = !sevenElevenFull;
-  document.getElementById("sevenElevenShippingFee").textContent = formatNumber(adminState.settings.shippingFeeTwd || 60);
-  document.getElementById("paymentSettingsTitle").textContent = sevenElevenFull ? "全款與付款期限" : "訂金與付款規則";
-  document.getElementById("paymentReminderLabel").textContent = sevenElevenFull ? "全款提醒起始時間（小時）" : "訂金提醒起始時間（小時）";
-  if (sevenElevenFull) {
-    const filter = document.getElementById("orderStatusFilter");
-    const selected = filter.value;
-    filter.innerHTML = `<option value="active">進行中</option><option value="待收全款">待收全款</option><option value="已收到全款">已收到全款</option><option value="待寄出">待寄出</option><option value="已寄出">已寄出</option><option value="${ORDER_COMPLETED_STATUS}">${ORDER_COMPLETED_STATUS}</option><option value="已取消">已取消</option><option value="all">全部訂單</option>`;
-    filter.value = [...filter.options].some((option) => option.value === selected) ? selected : "active";
-  }
   updatePaymentRulePreview();
   updateAdminPricePreview();
 }
@@ -1289,7 +1059,6 @@ async function saveSettings(event) {
     ? {
         section,
         saleClosed: document.getElementById("saleClosed").checked,
-        saleClosesAt: document.getElementById("saleClosesAt").value,
         saleClosedNotice: document.getElementById("saleClosedNotice").value.trim(),
         preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
       }
@@ -1306,7 +1075,6 @@ async function saveSettings(event) {
             paymentReminderHours: Number(document.getElementById("paymentReminderHours").value),
             paymentDeadlineHours: Number(document.getElementById("paymentDeadlineHours").value),
             paymentGraceHours: Number(document.getElementById("paymentGraceHours").value),
-            paymentAutoCancelEnabled: document.getElementById("paymentAutoCancelEnabled").checked,
           }
         : {
             section: "mall",

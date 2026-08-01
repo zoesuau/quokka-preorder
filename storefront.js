@@ -1,8 +1,8 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-window.QUOKKA_APP_VERSION = "20260802-variant-inventory";
+window.QUOKKA_APP_VERSION = "20260801-submit-status";
 const state = {
   products: [],
-  settings: { preorderNotice: "", depositPercent: 50, orderFlowMode: "mall_deposit", shippingFeeTwd: 60, saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
+  settings: { preorderNotice: "", depositPercent: 50, saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
   catalogReady: false,
   catalogLoadPromise: null,
   category: "全部",
@@ -25,11 +25,7 @@ const demoProducts = [
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  const brandName = CONFIG.brandName || "代購訂購系統";
-  document.title = `${brandName}｜預購訂單`;
-  document.getElementById("brandName").textContent = brandName;
-  document.getElementById("welcomeTitle").textContent = `歡迎來到${brandName}`;
-  document.getElementById("orderBotNotice").textContent = `若已加入${brandName}官方帳號，訂單成立後 BOT 會傳送訂單小卡；需要匯款時，請按小卡下方的「匯款資訊」，管理方才會提供帳戶。`;
+  document.getElementById("brandName").textContent = CONFIG.brandName || "袋著走";
   bindEvents();
   const ordersShortcut = isOrdersShortcut();
   if (ordersShortcut) showOrdersLoading();
@@ -64,7 +60,6 @@ function ensureCatalogLoaded() {
 function bindEvents() {
   document.getElementById("saleClosedDialog").addEventListener("cancel", (event) => event.preventDefault());
   document.getElementById("addToCart").addEventListener("click", addSelectedProduct);
-  document.getElementById("dialogVariant").addEventListener("change", updateSelectedVariant);
   document.getElementById("openCheckout").addEventListener("click", openCheckout);
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
   document.getElementById("myOrdersButton").addEventListener("click", showMyOrders);
@@ -159,18 +154,6 @@ function cleanLiffCallbackParams() {
 }
 
 async function loadCatalog() {
-  if (isLocalPreview()) {
-    if (new URLSearchParams(location.search).get("orderFlow") === "seven_eleven_full") {
-      state.settings = {
-        ...state.settings,
-        orderFlowMode: "seven_eleven_full",
-        shippingFeeTwd: 60,
-        preorderNotice: "商品下訂後才會採購。每張訂單一次支付全款，並加收 7-11 店到店運費。",
-      };
-    }
-    useDemoCatalog();
-    return;
-  }
   if (!CONFIG.apiUrl) throw new Error("API_URL_NOT_CONFIGURED");
   const url = new URL(CONFIG.apiUrl);
   url.searchParams.set("action", "readPublicCatalog");
@@ -194,9 +177,7 @@ function useDemoCatalog() {
   state.products = demoProducts;
   renderCatalog();
   document.getElementById("catalogStatus").innerHTML = CONFIG.apiUrl
-    ? isLocalPreview()
-      ? "目前為本機版面預覽，不會連線正式訂單資料。"
-      : "目前無法讀取商品，暫時顯示示意內容。"
+    ? "目前無法讀取商品，暫時顯示示意內容。"
     : "目前為版面預覽。部署 GAS 後，商品會由手機後台顯示在這裡。";
   document.getElementById("catalogStatus").hidden = false;
 }
@@ -218,16 +199,10 @@ function renderCatalog() {
     })
     : categoryProducts;
   document.getElementById("productCount").textContent = `${visible.length} 件商品`;
-  const sevenElevenFull = isSevenElevenFullMode();
-  document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || (sevenElevenFull
-    ? "商品下訂後才會採購。每張訂單一次支付全款，並加收 7-11 店到店運費。"
-    : "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。");
+  document.getElementById("preorderNotice").textContent = state.settings.preorderNotice || "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。";
   const depositPercent = Number(state.settings.depositPercent || 50);
-  document.getElementById("depositRuleLabel").textContent = sevenElevenFull ? "本次應付全款" : `本次訂金（商品總額 ${depositPercent}%）`;
-  document.getElementById("preorderAgreementText").textContent = sevenElevenFull
-    ? "我確認取件資料正確，並了解每張訂單各收一次 7-11 店到店運費，分開下單不合併運費。"
-    : `我了解這是預購商品；下單先付商品總額的 ${depositPercent}% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。`;
-  configureCheckoutForOrderFlow();
+  document.getElementById("depositRuleLabel").textContent = `本次訂金（商品總額 ${depositPercent}%）`;
+  document.getElementById("preorderAgreementText").textContent = `我了解這是預購商品；下單先付商品總額的 ${depositPercent}% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。`;
   const grid = document.getElementById("productGrid");
   grid.innerHTML = visible.map((product) => {
     return `<article class="product-card" data-product-id="${escapeAttr(product.id)}">
@@ -235,7 +210,7 @@ function renderCatalog() {
       <div class="product-card-body"><span class="category-label">${escapeHtml(product.category || "韓國小物")}</span>
       <h3>${escapeHtml(product.name)}</h3>
       <div class="product-card-purchase"><p class="price">NT$${formatNumber(product.priceTwd)}</p><button class="card-add-button" type="button" data-add-product="${escapeAttr(product.id)}" aria-label="加入 ${escapeAttr(product.name)}">＋ 加入</button></div>
-      <small>${sevenElevenFull ? "商品售價" : `訂金 NT$${formatNumber(calculateDeposit(product.priceTwd))}`}</small></div>
+      <small>訂金 NT$${formatNumber(calculateDeposit(product.priceTwd))}</small></div>
     </article>`;
   }).join("");
   grid.querySelectorAll(".product-card").forEach((card) => {
@@ -260,11 +235,6 @@ function productImage(product) {
 function productImageUrls(product) {
   const urls = Array.isArray(product?.imageUrls) ? product.imageUrls : [];
   return [...new Set([...urls, product?.imageUrl].map((url) => String(url || "").trim()).filter(Boolean))].slice(0, 10);
-}
-
-function productVariantOptions(product) {
-  if (!product?.variantInventoryEnabled || !Array.isArray(product?.variantOptions)) return [];
-  return product.variantOptions.filter((option) => option && option.name);
 }
 
 function selectDialogImage(product, index) {
@@ -293,51 +263,20 @@ function openProduct(id) {
   document.getElementById("dialogName").textContent = product.name;
   document.getElementById("dialogTwd").textContent = `售價 NT$${formatNumber(product.priceTwd)}`;
   document.getElementById("dialogDescription").textContent = product.description || "韓國旅途中現場代購商品";
-  const variantOptions = productVariantOptions(product);
   const variants = Array.isArray(product.variants) ? product.variants : parseVariants(product.variants);
   document.getElementById("variantField").hidden = variants.length === 0;
-  document.getElementById("dialogVariant").innerHTML = variantOptions.length
-    ? variantOptions.map((option) => `<option value="${escapeAttr(option.id)}" ${Number(option.stockQuantity) === 0 ? "disabled" : ""}>${escapeHtml(option.name)}${Number(option.stockQuantity) === 0 ? "（售罄）" : ""}</option>`).join("")
-    : variants.map((variant) => `<option value="${escapeAttr(variant)}">${escapeHtml(variant)}</option>`).join("");
+  document.getElementById("dialogVariant").innerHTML = variants.map((variant) => `<option>${escapeHtml(variant)}</option>`).join("");
   document.getElementById("dialogQty").value = "1";
-  updateSelectedVariant();
   document.getElementById("productDialog").showModal();
-}
-
-function updateSelectedVariant() {
-  const product = state.selectedProduct;
-  if (!product) return;
-  const options = productVariantOptions(product);
-  const selected = options.find((option) => option.id === document.getElementById("dialogVariant").value) || options.find((option) => Number(option.stockQuantity) > 0);
-  if (selected && document.getElementById("dialogVariant").value !== selected.id) document.getElementById("dialogVariant").value = selected.id;
-  if (selected?.imageUrl) {
-    const image = document.getElementById("dialogImage");
-    image.src = selected.imageUrl;
-    image.alt = `${product.name}，${selected.name}`;
-    document.querySelectorAll("[data-dialog-image]").forEach((button) => button.classList.remove("active"));
-  } else if (options.length) {
-    selectDialogImage(product, 0);
-  }
-  const available = selected ? Number(selected.stockQuantity) : product.stockQuantity == null ? 6 : Number(product.stockQuantity);
-  const currentInCart = state.cart.find((item) => item.productId === product.id && item.variantId === selected?.id)?.qty || 0;
-  const maxQty = Math.max(0, Math.min(6, available - currentInCart));
-  const qtySelect = document.getElementById("dialogQty");
-  qtySelect.innerHTML = Array.from({ length: maxQty }, (_, index) => `<option value="${index + 1}">${index + 1} 件</option>`).join("");
-  const addButton = document.getElementById("addToCart");
-  addButton.disabled = maxQty === 0;
-  addButton.textContent = maxQty === 0 ? "此款式已售罄" : "加入預購";
 }
 
 function addSelectedProduct() {
   if (state.settings.saleClosed) return updateSaleClosedState();
   const product = state.selectedProduct;
   if (!product) return;
-  const selectedValue = document.getElementById("variantField").hidden ? "" : document.getElementById("dialogVariant").value;
-  const variantOption = productVariantOptions(product).find((option) => option.id === selectedValue);
-  const variant = variantOption ? variantOption.name : selectedValue;
+  const variant = document.getElementById("variantField").hidden ? "" : document.getElementById("dialogVariant").value;
   const qty = Number(document.getElementById("dialogQty").value) || 1;
-  if (variantOption && Number(variantOption.stockQuantity) < qty) return showToast("此款式庫存不足，請重新選擇數量");
-  addProductToCart(product, variant, qty, variantOption);
+  addProductToCart(product, variant, qty);
   document.getElementById("productDialog").close();
 }
 
@@ -350,12 +289,10 @@ function quickAddProduct(id) {
   addProductToCart(product, "", 1);
 }
 
-function addProductToCart(product, variant, qty, variantOption = null) {
+function addProductToCart(product, variant, qty) {
   const existing = state.cart.find((item) => item.productId === product.id && item.variant === variant);
-  const available = variantOption ? Number(variantOption.stockQuantity) : product.stockQuantity;
-  if (available != null && (existing?.qty || 0) + qty > Number(available)) return showToast("庫存不足，請重新選擇數量");
   if (existing) existing.qty += qty;
-  else state.cart.push({ productId: product.id, variant, variantId: variantOption?.id || "", variantImageUrl: variantOption?.imageUrl || "", qty });
+  else state.cart.push({ productId: product.id, variant, qty });
   updateCart();
   showToast(`已加入 ${qty} 件商品`);
 }
@@ -376,28 +313,8 @@ function getTotals() {
     qty += item.qty;
     estimatedTotal += Number(product.priceTwd || 0) * item.qty;
   });
-  const shippingFee = isSevenElevenFullMode() ? Number(state.settings.shippingFeeTwd || 0) : 0;
-  const orderTotal = estimatedTotal + shippingFee;
-  const depositTotal = isSevenElevenFullMode() ? orderTotal : calculateDeposit(estimatedTotal);
-  return { qty, estimatedTotal, shippingFee, orderTotal, depositTotal, balanceTotal: isSevenElevenFullMode() ? 0 : estimatedTotal - depositTotal };
-}
-
-function isSevenElevenFullMode() {
-  return state.settings.orderFlowMode === "seven_eleven_full";
-}
-
-function configureCheckoutForOrderFlow() {
-  const enabled = isSevenElevenFullMode();
-  document.getElementById("shippingFeeRow").hidden = !enabled;
-  document.getElementById("balanceRow").hidden = enabled;
-  document.getElementById("sevenElevenPickupFields").hidden = !enabled;
-  document.getElementById("pickupStoreCode").required = enabled;
-  document.getElementById("pickupStoreName").required = enabled;
-  document.getElementById("customerNameLabel").textContent = enabled ? "取件人真實姓名 *" : "訂購人姓名 *";
-  document.getElementById("cartPaymentLabel").textContent = enabled ? "全款" : "訂金";
-  document.getElementById("checkoutMoneyNote").textContent = enabled
-    ? "每張訂單各收一次運費；同一取件人分開下單也不合併運費。"
-    : "商品款尚不含 iOPEN Mall 運費，運費將於回國後結帳時另計。";
+  const depositTotal = calculateDeposit(estimatedTotal);
+  return { qty, estimatedTotal, depositTotal, balanceTotal: estimatedTotal - depositTotal };
 }
 
 function calculateDeposit(amount) {
@@ -414,14 +331,13 @@ function renderCheckout() {
   document.getElementById("checkoutItems").innerHTML = state.cart.map((item, index) => {
     const product = state.products.find((entry) => entry.id === item.productId);
     if (!product) return "";
-    const image = item.variantImageUrl || productImageUrls(product)[0] || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
+    const image = productImageUrls(product)[0] || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
     return `<div class="checkout-item"><img src="${escapeAttr(image)}" alt="" /><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(item.variant || "單一款式")}・${item.qty} 件・NT$${formatNumber(Number(product.priceTwd || 0) * item.qty)}</small></div><button class="remove-item" type="button" data-remove="${index}">移除</button></div>`;
   }).join("");
   const totals = getTotals();
   document.getElementById("estimatedTotal").textContent = `NT$${formatNumber(totals.estimatedTotal)}`;
   document.getElementById("depositTotal").textContent = `NT$${formatNumber(totals.depositTotal)}`;
   document.getElementById("balanceTotal").textContent = `NT$${formatNumber(totals.balanceTotal)}`;
-  document.getElementById("shippingFeeTotal").textContent = `NT$${formatNumber(totals.shippingFee)}`;
 }
 
 async function submitOrder(event) {
@@ -444,18 +360,14 @@ async function submitOrder(event) {
     status.textContent = "目前下單人數較多，系統仍在確認庫存。請繼續停留此頁面，完成後會自動顯示結果。";
   }, 15000);
   try {
-    const customerName = document.getElementById("customerName").value.trim();
     const payload = {
       action: "createPreorder",
       idToken: state.line.idToken,
       lineDisplayName: state.line.displayName,
-      customerName,
-      recipientName: isSevenElevenFullMode() ? customerName : "",
+      customerName: document.getElementById("customerName").value.trim(),
       phone: document.getElementById("phone").value.trim(),
-      pickupStoreCode: isSevenElevenFullMode() ? document.getElementById("pickupStoreCode").value.trim() : "",
-      pickupStoreName: isSevenElevenFullMode() ? document.getElementById("pickupStoreName").value.trim() : "",
       note: document.getElementById("note").value.trim(),
-      items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, variantId: item.variantId || "", qty: item.qty })),
+      items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, qty: item.qty })),
     };
     payload.requestId = getOrCreateOrderRequestId(payload);
     const result = await apiPost(payload);
@@ -465,10 +377,9 @@ async function submitOrder(event) {
     updateCart();
     document.getElementById("checkoutDialog").close();
     document.getElementById("orderForm").reset();
-    const brandName = CONFIG.brandName || "管理方";
     alert(result.botMessageSent
-      ? `訂單已成立！\n訂單編號：${result.orderNo}\n訂單小卡已傳送到${brandName} LINE 對話；如需匯款，請按小卡下方的「匯款資訊」。`
-      : `訂單已成立！\n訂單編號：${result.orderNo}\n小卡暫時未送達，請直接聯絡${brandName}確認匯款資訊。`);
+      ? `訂單已成立！\n訂單編號：${result.orderNo}\n訂單小卡已傳送到鼠購易 LINE 對話；如需匯款，請按小卡下方的「匯款資訊」。`
+      : `訂單已成立！\n訂單編號：${result.orderNo}\n小卡暫時未送達，請直接聯絡鼠購易確認匯款資訊。`);
     await showMyOrders();
   } catch (error) {
     console.error(error);
@@ -477,7 +388,6 @@ async function submitOrder(event) {
       PRODUCT_CHANGED: "商品資訊已更新，請重新整理後再送出",
       LINE_TOKEN_INVALID: "LINE 登入已過期，請關閉頁面後從 LINE 重新開啟",
       LINE_LOGIN_REQUIRED: "請從 LINE 開啟此頁並完成登入",
-      INVALID_PICKUP_DETAILS: "請確認取件人真實姓名、6 位數 7-11 店號與店名",
       LINE_CONFIG_MISSING: "LINE 登入設定尚未完成，請聯絡管理員",
       INVALID_CUSTOMER: "請確認姓名與手機號碼皆已正確填寫",
       INVALID_ITEMS: "購物車內容有誤，請重新選擇商品",
@@ -511,10 +421,7 @@ async function submitOrder(event) {
 function getOrCreateOrderRequestId(payload) {
   const fingerprint = JSON.stringify({
     customerName: payload.customerName,
-    recipientName: payload.recipientName,
     phone: payload.phone,
-    pickupStoreCode: payload.pickupStoreCode,
-    pickupStoreName: payload.pickupStoreName,
     note: payload.note,
     items: payload.items,
   });
@@ -617,12 +524,9 @@ async function showCatalog() {
 }
 
 function renderOrder(order) {
-  const sevenElevenFull = order.orderFlowMode === "seven_eleven_full";
   const mallReady = Boolean(order.mallPaymentDueText);
   const displayStatus = order.mallPaymentExpired ? "賣場付款已逾期" : (mallReady ? "賣場已開設" : (order.status || "待人工確認"));
-  const depositLabel = sevenElevenFull
-    ? (order.status === "待收全款" ? "應付全款" : "已付全款")
-    : order.status === "待收訂金"
+  const depositLabel = order.status === "待收訂金"
     ? "應付訂金"
     : order.status === "待確認訂金"
       ? "已回報訂金"
@@ -638,13 +542,7 @@ function renderOrder(order) {
   const paymentReport = order.status === "待確認訂金"
       ? `<div class="payment-report-complete"><strong>已回報匯款後五碼 ${escapeHtml(order.transferLast5 || "")}</strong><span>${escapeHtml(order.paymentReportedAt || "等待管理員核帳")}</span></div>`
       : "";
-  const pickupDetails = sevenElevenFull
-    ? `<div class="order-shortage-notice"><strong>7-11 店到店</strong><span>${escapeHtml(order.recipientName || "")}・${escapeHtml(order.phone || "")}</span><span>${escapeHtml(order.pickupStoreCode || "")} ${escapeHtml(order.pickupStoreName || "")}</span></div>`
-    : "";
-  const moneyRows = sevenElevenFull
-    ? `<div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>運費</span><strong>NT$${formatNumber(order.shippingFee)}</strong></div><div><span>${depositLabel}</span><strong>NT$${formatNumber(order.orderTotal)}</strong></div>`
-    : `<div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>${depositLabel}</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>後續應付</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div>`;
-  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status ${order.mallPaymentExpired ? "overdue" : ""}">${escapeHtml(displayStatus)}</span></div><pre>${escapeHtml(order.itemsSummary || "品項已全數取消")}</pre>${pickupDetails}${shortageNotice}<div class="order-money">${moneyRows}</div>${paymentReport}${mallAction}</article>`;
+  return `<article class="order-card"><div class="order-card-header"><div><h3>${escapeHtml(order.orderNo)}</h3><time>${escapeHtml(order.createdAt)}</time></div><span class="order-status ${order.mallPaymentExpired ? "overdue" : ""}">${escapeHtml(displayStatus)}</span></div><pre>${escapeHtml(order.itemsSummary || "品項已全數取消")}</pre>${shortageNotice}<div class="order-money"><div><span>商品總額</span><strong>NT$${formatNumber(order.estimatedTotal)}</strong></div><div><span>${depositLabel}</span><strong>NT$${formatNumber(order.depositTotal)}</strong></div><div><span>後續應付</span><strong>NT$${formatNumber(order.estimatedBalance)}</strong></div></div>${paymentReport}${mallAction}</article>`;
 }
 
 async function apiPost(payload) {
