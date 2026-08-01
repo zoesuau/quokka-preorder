@@ -651,6 +651,14 @@ test("取消售罄訂單會回補數量並重新上架；無限庫存仍保持�
   assert.equal(unlimited.productRow[12], "");
 });
 
+test("取消含封存商品的舊訂單會回補庫存但不恢復販售", () => {
+  const archived = createHarness("待收訂金", {}, { productStock: 0 });
+  archived.productRow[7] = "已封存";
+  archived.context.cancelOrder_("QK-TEST", "管理員取消");
+  assert.equal(archived.productRow[12], 2);
+  assert.equal(archived.productRow[7], "已封存");
+});
+
 test("取消狀態寫入失敗時會回滾已加回的庫存", () => {
   const { context, row, productRow, pushes } = createHarness(
     "待收訂金",

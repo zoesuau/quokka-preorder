@@ -43,6 +43,14 @@ test("既有未設定庫存的商品維持原上架狀態", () => {
   assert.deepEqual(Array.from(product.imageUrls), ["https://example.com/legacy.jpg"]);
 });
 
+test("封存商品保留資料但不可上架", () => {
+  const row = ["p1", "封存商品", "吊飾", "https://example.com/legacy.jpg", 1000, "", "", "已封存", 1, "2026", "2026", 100, 3, "[]"];
+  const product = context.rowToProduct_(row, 0.022);
+  assert.equal(product.active, false);
+  assert.equal(product.archived, true);
+  assert.equal(product.stockQuantity, 3);
+});
+
 test("新商品可保存多張照片且第一張是封面", () => {
   const product = context.validateProduct_(baseProduct);
   assert.equal(product.imageUrl, baseProduct.imageUrls[0]);
@@ -68,6 +76,7 @@ function createStockUpdateHarness(initialStatus = "上架") {
       }
       return {
         getValue: () => row[column - 1],
+        getDisplayValue: () => String(row[column - 1] ?? ""),
         setValue: (value) => { row[column - 1] = value; },
       };
     },
@@ -81,7 +90,7 @@ function createStockUpdateHarness(initialStatus = "上架") {
   context.formatDateTime_ = () => "now";
   context.invalidatePublicCatalogCache_ = () => { cacheInvalidations += 1; };
   context.readSettings_ = () => ({ exchangeRate: 0.022 });
-  context.rowToProduct_ = (savedRow) => ({ id: savedRow[0], active: savedRow[7] === "上架", stockQuantity: savedRow[12] });
+  context.rowToProduct_ = (savedRow) => ({ id: savedRow[0], active: savedRow[7] === "上架", archived: savedRow[7] === "已封存", stockQuantity: savedRow[12] });
   context.json_ = (payload) => payload;
   return { row, getCacheInvalidations: () => cacheInvalidations };
 }
@@ -101,6 +110,33 @@ test("卡片增加庫存時保留原本下架狀態", () => {
   const result = context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: 5 });
   assert.equal(result.product.stockQuantity, 5);
   assert.equal(result.product.active, false);
+});
+
+test("封存商品調整庫存後仍保持封存", () => {
+  const harness = createStockUpdateHarness("已封存");
+  const result = context.handleAdminUpdateProductStock_({ productId: "p1", stockQuantity: 0 });
+  assert.equal(result.product.archived, true);
+  assert.equal(harness.row[7], "已封存");
+});
+
+test("封存與恢復只改狀態，不刪除商品資料列", () => {
+  const harness = createStockUpdateHarness("上架");
+  const archived = context.handleAdminArchiveProduct_({ productId: "p1", archived: true });
+  assert.equal(archived.product.archived, true);
+  assert.equal(harness.row[7], "已封存");
+  const restored = context.handleAdminArchiveProduct_({ productId: "p1", archived: false });
+  assert.equal(restored.product.archived, false);
+  assert.equal(restored.product.active, false);
+  assert.equal(harness.row[7], "下架");
+  assert.equal(harness.getCacheInvalidations(), 2);
+});
+
+test("封存商品拒絕由舊頁面的上下架開關重新上架", () => {
+  createStockUpdateHarness("已封存");
+  assert.throws(
+    () => context.handleAdminToggleProduct_({ productId: "p1", active: true }),
+    /PRODUCT_ARCHIVED/,
+  );
 });
 
 test("卡片庫存拒絕負數與小數", () => {

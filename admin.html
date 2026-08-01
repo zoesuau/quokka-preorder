@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260801-product-inventory" />
-    <link rel="stylesheet" href="admin.css?v=20260801-data-export" />
+    <link rel="stylesheet" href="admin.css?v=20260801-product-archive" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260801-data-export" defer></script>
+    <script src="admin.js?v=20260801-product-archive" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -76,7 +76,7 @@
       <section class="admin-page-panel" id="adminProductsPage" hidden>
       <section class="admin-intro">
         <div><strong id="activeCount">0</strong><span>上架中</span></div>
-        <div><strong id="totalCount">0</strong><span>全部商品</span></div>
+        <div><strong id="totalCount">0</strong><span>目前商品</span></div>
         <button class="primary-button" type="button" id="newProduct">＋ 新增商品</button>
       </section>
 
@@ -85,7 +85,7 @@
           <span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></span>
           <input id="productSearch" type="search" aria-label="搜尋商品名稱或分類" placeholder="商品名稱或分類" />
         </label>
-        <select id="statusFilter" aria-label="上架狀態"><option value="all">全部狀態</option><option value="active">上架中</option><option value="inactive">已下架</option></select>
+        <select id="statusFilter" aria-label="商品狀態"><option value="current">目前商品</option><option value="active">上架中</option><option value="inactive">已下架</option><option value="archived">已封存</option></select>
       </div>
 
       <div class="status-panel" id="adminStatus">正在確認管理員身分…</div>
@@ -184,6 +184,23 @@
         <label class="field"><span>排序</span><input id="productSortOrder" type="number" step="1" min="0" /></label>
         <label class="field"><span>販售狀態</span><select id="productStatus"><option value="active">上架</option><option value="inactive">缺貨</option></select><small class="field-help">缺貨商品會立即從前台隱藏，但仍保留在後台，可隨時重新上架。</small></label>
         <button class="primary-button" id="saveProduct" type="submit">儲存商品</button>
+        <section class="product-archive-section" id="productArchiveSection" hidden>
+          <button class="product-archive-action" id="archiveProduct" type="button">封存商品</button>
+          <small id="productArchiveHelp">商品會從日常列表與客人頁面移除，但保留既有訂單資料。</small>
+        </section>
+      </form>
+    </dialog>
+
+    <dialog class="product-archive-dialog" id="productArchiveDialog" aria-labelledby="productArchiveTitle" aria-describedby="productArchiveMessage">
+      <form id="productArchiveForm">
+        <input id="productArchiveId" type="hidden" />
+        <p class="eyebrow">PRODUCT ARCHIVE</p>
+        <h2 id="productArchiveTitle">封存這項商品？</h2>
+        <p id="productArchiveMessage"></p>
+        <div class="product-archive-confirm-actions">
+          <button id="productArchiveCancel" type="button">返回</button>
+          <button class="product-archive-confirm" id="productArchiveConfirm" type="submit">封存商品</button>
+        </div>
       </form>
     </dialog>
 

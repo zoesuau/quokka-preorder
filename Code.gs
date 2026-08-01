@@ -288,6 +288,8 @@ function doPost(e) {
       return handleAdminSendMallExpiryReminder_(data);
     if (action === "adminSaveProduct") return handleAdminSaveProduct_(data);
     if (action === "adminToggleProduct") return handleAdminToggleProduct_(data);
+    if (action === "adminArchiveProduct")
+      return handleAdminArchiveProduct_(data);
     if (action === "adminUpdateProductStock")
       return handleAdminUpdateProductStock_(data);
     if (action === "adminUploadProductImage")
@@ -4413,6 +4415,9 @@ function handleAdminSaveProduct_(data) {
     var createdAt = rowNumber
       ? sheet.getRange(rowNumber, 10).getDisplayValue()
       : now;
+    var currentStatus = rowNumber
+      ? String(sheet.getRange(rowNumber, 8).getDisplayValue() || "").trim()
+      : "";
     var row = [
       product.id,
       product.name,
@@ -4421,7 +4426,11 @@ function handleAdminSaveProduct_(data) {
       product.krwPrice || "",
       product.variants.join("\n"),
       product.description,
-      product.active && product.stockQuantity > 0 ? "上架" : "下架",
+      currentStatus === "已封存"
+        ? "已封存"
+        : product.active && product.stockQuantity > 0
+          ? "上架"
+          : "下架",
       product.sortOrder,
       createdAt,
       now,
@@ -4454,10 +4463,48 @@ function handleAdminToggleProduct_(data) {
     var sheet = spreadsheet_().getSheetByName("Products");
     var rowNumber = findProductRow_(sheet, productId);
     if (!rowNumber) throw new Error("PRODUCT_NOT_FOUND");
+    var currentStatus = String(
+      sheet.getRange(rowNumber, 8).getDisplayValue() || "",
+    ).trim();
+    if (currentStatus === "已封存") throw new Error("PRODUCT_ARCHIVED");
     var stockCell = sheet.getRange(rowNumber, 13).getValue();
     if (data.active && stockCell !== "" && number_(stockCell) <= 0)
       throw new Error("OUT_OF_STOCK");
     sheet.getRange(rowNumber, 8).setValue(data.active ? "上架" : "下架");
+    sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
+    var row = sheet
+      .getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length)
+      .getValues()[0];
+    invalidatePublicCatalogCache_();
+    return json_({
+      ok: true,
+      product: rowToProduct_(row, readSettings_().exchangeRate),
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleAdminArchiveProduct_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  var productId = String(data.productId || "").trim();
+  if (!productId || typeof data.archived !== "boolean")
+    throw new Error("INVALID_PRODUCT");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    setupQuokkaPreorder();
+    var sheet = spreadsheet_().getSheetByName("Products");
+    var rowNumber = findProductRow_(sheet, productId);
+    if (!rowNumber) throw new Error("PRODUCT_NOT_FOUND");
+    var statusCell = sheet.getRange(rowNumber, 8);
+    var currentStatus = String(statusCell.getDisplayValue() || "").trim();
+    var nextStatus = data.archived
+      ? "已封存"
+      : currentStatus === "已封存"
+        ? "下架"
+        : currentStatus || "下架";
+    statusCell.setValue(nextStatus);
     sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
     var row = sheet
       .getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length)
@@ -4492,8 +4539,11 @@ function handleAdminUpdateProductStock_(data) {
     var sheet = spreadsheet_().getSheetByName("Products");
     var rowNumber = findProductRow_(sheet, productId);
     if (!rowNumber) throw new Error("PRODUCT_NOT_FOUND");
+    var currentStatus = String(
+      sheet.getRange(rowNumber, 8).getDisplayValue() || "",
+    ).trim();
     sheet.getRange(rowNumber, 13).setValue(stockQuantity);
-    if (stockQuantity === 0)
+    if (stockQuantity === 0 && currentStatus !== "已封存")
       sheet.getRange(rowNumber, 8).setValue("下架");
     sheet.getRange(rowNumber, 11).setValue(formatDateTime_(new Date()));
     var row = sheet
@@ -4828,7 +4878,9 @@ function rowToProduct_(row, legacyExchangeRate) {
     imageUrls.unshift(legacyImageUrl);
   imageUrls = imageUrls.slice(0, 10);
   var stockQuantity = row[12] === "" || row[12] == null ? null : number_(row[12]);
-  var isActive = String(row[7] || "").trim() === "上架";
+  var productStatus = String(row[7] || "").trim();
+  var isArchived = productStatus === "已封存";
+  var isActive = productStatus === "上架";
   if (stockQuantity === 0) isActive = false;
   return {
     id: String(row[0] || "").trim(),
@@ -4846,6 +4898,7 @@ function rowToProduct_(row, legacyExchangeRate) {
       .filter(Boolean),
     description: String(row[6] || "").trim(),
     active: isActive,
+    archived: isArchived,
     stockQuantity: stockQuantity,
     sortOrder: number_(row[8]),
     createdAt: displayDate_(row[9]),
@@ -5140,6 +5193,7 @@ function safeError_(error) {
     "INVALID_PRODUCT",
     "PRODUCT_CHANGED",
     "PRODUCT_NOT_FOUND",
+    "PRODUCT_ARCHIVED",
     "INVALID_IMAGE",
     "IMAGE_TOO_LARGE",
     "INVALID_SETTINGS",

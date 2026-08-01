@@ -60,4 +60,17 @@ test("商品卡片固定兩排且縮小按鈕視覺佔位", () => {
   assert.match(adminCss, /-webkit-line-clamp: 2/);
 });
 
+test("商品編輯底部提供可恢復的封存操作", () => {
+  assert.match(adminHtml, /id="archiveProduct"[^>]*>封存商品</);
+  assert.match(adminHtml, /value="archived">已封存</);
+  assert.match(adminJs, /action: "adminArchiveProduct"/);
+  assert.match(adminJs, /product\.archived/);
+  assert.match(adminCss, /\.product-archive-action[^}]+color: #c9363e/);
+  const start = gas.indexOf("function handleAdminArchiveProduct_(");
+  const next = gas.indexOf("\nfunction ", start + 1);
+  const source = gas.slice(start, next);
+  assert.match(source, /"已封存"/);
+  assert.doesNotMatch(source, /deleteRow/);
+});
+
 console.log(`\n${passed} product card control tests passed.`);

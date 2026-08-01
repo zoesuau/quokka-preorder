@@ -38,7 +38,25 @@
         <label class="field"><span>排序</span><input type="number" value="1" /></label>
         <label class="field"><span>販售狀態</span><select><option selected>上架</option><option>缺貨</option></select></label>
         <button class="primary-button" type="button">儲存商品</button>
+        <section class="product-archive-section">
+          <button class="product-archive-action" id="previewArchiveProduct" type="button">封存商品</button>
+          <small>商品會從日常列表與客人頁面移除，但保留既有訂單資料。</small>
+        </section>
       </form>
     </dialog>
+    <dialog class="product-archive-dialog" id="previewArchiveDialog" aria-labelledby="previewArchiveTitle">
+      <form method="dialog">
+        <p class="eyebrow">PRODUCT ARCHIVE</p>
+        <h2 id="previewArchiveTitle">封存這項商品？</h2>
+        <p>「橡皮擦組＋棉花糖外殼吊飾」會從後台主要列表與客人頁面移除；既有訂單與庫存回補仍會保留。</p>
+        <div class="product-archive-confirm-actions">
+          <button value="cancel">返回</button>
+          <button class="product-archive-confirm" value="confirm">封存商品</button>
+        </div>
+      </form>
+    </dialog>
+    <script>
+      document.getElementById("previewArchiveProduct").addEventListener("click", () => document.getElementById("previewArchiveDialog").showModal());
+    </script>
   </body>
 </html>

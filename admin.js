@@ -47,6 +47,9 @@ function bindAdminEvents() {
   document.getElementById("productImageList").addEventListener("click", handleEditorImageAction);
   document.getElementById("productCategory").addEventListener("change", updateNewCategoryField);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
+  document.getElementById("archiveProduct").addEventListener("click", openProductArchiveDialog);
+  document.getElementById("productArchiveForm").addEventListener("submit", archiveProduct);
+  document.getElementById("productArchiveCancel").addEventListener("click", () => document.getElementById("productArchiveDialog").close());
   document.getElementById("stockEditorForm").addEventListener("submit", saveProductStock);
   document.getElementById("stockEditorClose").addEventListener("click", () => document.getElementById("stockEditorDialog").close());
   document.querySelector(".stock-quick-options").addEventListener("click", selectQuickStockQuantity);
@@ -725,13 +728,16 @@ function renderAdminProducts() {
   const search = document.getElementById("productSearch").value.trim().toLowerCase();
   const filter = document.getElementById("statusFilter").value;
   const products = adminState.products.filter((product) => {
+    if (filter === "archived") {
+      if (!product.archived) return false;
+    } else if (product.archived) return false;
     if (filter === "active" && !product.active) return false;
     if (filter === "inactive" && product.active) return false;
     return !search || `${product.name} ${product.category}`.toLowerCase().includes(search);
   });
   document.getElementById("activeCount").textContent = adminState.products.filter((product) => product.active).length;
-  document.getElementById("totalCount").textContent = adminState.products.length;
-  document.getElementById("adminProductList").innerHTML = products.map((product) => `<article class="admin-product-card ${product.active ? "" : "inactive"}">
+  document.getElementById("totalCount").textContent = adminState.products.filter((product) => !product.archived).length;
+  document.getElementById("adminProductList").innerHTML = products.map((product) => `<article class="admin-product-card ${product.archived ? "archived" : product.active ? "" : "inactive"}">
     <img src="${escapeAttr(primaryProductImage(product) || demoPlaceholder)}" alt="" />
     <div class="admin-product-info">
       <div class="admin-product-meta">
@@ -742,7 +748,9 @@ function renderAdminProducts() {
       </div>
       <div class="admin-product-primary">
         <h3>${escapeHtml(product.name)}</h3>
-        <label class="admin-status-switch"><span>${product.active ? "上架中" : "已下架"}</span><input type="checkbox" data-toggle="${escapeAttr(product.id)}" aria-label="${product.active ? "下架" : "上架"} ${escapeAttr(product.name)}" ${product.active ? "checked" : ""} /><i aria-hidden="true"></i></label>
+        ${product.archived
+          ? '<span class="admin-archived-status">已封存</span>'
+          : `<label class="admin-status-switch"><span>${product.active ? "上架中" : "已下架"}</span><input type="checkbox" data-toggle="${escapeAttr(product.id)}" aria-label="${product.active ? "下架" : "上架"} ${escapeAttr(product.name)}" ${product.active ? "checked" : ""} /><i aria-hidden="true"></i></label>`}
       </div>
     </div>
   </article>`).join("");
@@ -814,11 +822,60 @@ function openEditor(product = null) {
   document.getElementById("productDescription").value = product?.description || "";
   document.getElementById("productSortOrder").value = product?.sortOrder ?? adminState.products.length + 1;
   document.getElementById("productStatus").value = product && !product.active ? "inactive" : "active";
+  document.getElementById("productStatus").disabled = Boolean(product?.archived);
+  const archiveSection = document.getElementById("productArchiveSection");
+  const archiveButton = document.getElementById("archiveProduct");
+  archiveSection.hidden = !product;
+  archiveButton.textContent = product?.archived ? "恢復商品" : "封存商品";
+  archiveButton.classList.toggle("is-restore", Boolean(product?.archived));
+  document.getElementById("productArchiveHelp").textContent = product?.archived
+    ? "恢復後會先保持下架，確認內容與庫存後再手動上架。"
+    : "商品會從日常列表與客人頁面移除，但保留既有訂單資料。";
   adminState.editorImageUrls = productImageUrls(product);
   renderEditorImages();
   updateNewCategoryField();
   updateAdminPricePreview();
   document.getElementById("productEditor").showModal();
+}
+
+function openProductArchiveDialog() {
+  const product = adminState.products.find((item) => item.id === document.getElementById("productId").value);
+  if (!product) return;
+  const restoring = Boolean(product.archived);
+  document.getElementById("productArchiveId").value = product.id;
+  document.getElementById("productArchiveTitle").textContent = restoring ? "恢復這項商品？" : "封存這項商品？";
+  document.getElementById("productArchiveMessage").textContent = restoring
+    ? `「${product.name}」會回到後台商品列表，並保持下架。`
+    : `「${product.name}」會從後台主要列表與客人頁面移除；既有訂單與庫存回補仍會保留。`;
+  const confirmButton = document.getElementById("productArchiveConfirm");
+  confirmButton.textContent = restoring ? "恢復商品" : "封存商品";
+  confirmButton.classList.toggle("is-restore", restoring);
+  document.getElementById("productArchiveDialog").showModal();
+}
+
+async function archiveProduct(event) {
+  event.preventDefault();
+  const productId = document.getElementById("productArchiveId").value;
+  const product = adminState.products.find((item) => item.id === productId);
+  if (!product) return document.getElementById("productArchiveDialog").close();
+  const archived = !product.archived;
+  const button = document.getElementById("productArchiveConfirm");
+  button.disabled = true;
+  button.textContent = archived ? "封存中…" : "恢復中…";
+  try {
+    const result = await adminPost({ action: "adminArchiveProduct", productId, archived });
+    if (!result.ok) throw new Error(result.error || "ARCHIVE_FAILED");
+    updateProductInState(result.product);
+    document.getElementById("productArchiveDialog").close();
+    document.getElementById("productEditor").close();
+    renderAdminProducts();
+    showToast(result.product.archived ? "商品已封存" : "商品已恢復並保持下架");
+  } catch (error) {
+    showToast(archived ? "商品封存失敗，請再試一次" : "商品恢復失敗，請再試一次");
+  } finally {
+    button.disabled = false;
+    button.textContent = archived ? "封存商品" : "恢復商品";
+  }
 }
 
 async function handleProductAction(event) {
