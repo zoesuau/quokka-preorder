@@ -2,7 +2,7 @@
 
 ## 結論
 
-原正式流程未通過 10／20 筆測試。修正版已在 `feature/load-testing` 與 GAS 測試部署第 6 版通過隔離驗證，但尚未部署正式環境。
+原正式流程未通過 10／20 筆測試。修正版已在 `feature/load-testing` 與 GAS 測試部署第 6 版通過隔離驗證，並於 2026-08-01 依序部署正式前端與正式 GAS 第 35 版。
 
 - 足量庫存：5／5、10／10、20／20 全部成功，沒有漏單或重複編號。
 - 最後一件：20 筆同時請求只有 1 筆建立成功，其餘 19 筆明確回傳 `OUT_OF_STOCK`。
@@ -52,10 +52,19 @@
 
 ## 測試環境
 
-- GAS 測試部署：第 6 版；正式 GAS 尚未更新。
+- GAS 測試部署：第 6 版；正式 GAS：第 35 版。
 - 測試資料只位於未公開的隔離試算表。
 - 測試完成後已將 `ENABLE_STRESS_TEST_MODE` 設回 `false`。
 - 關閉後重新呼叫安全握手，後端回傳 `STRESS_TEST_DISABLED`。
+
+## 正式部署紀錄
+
+- 正式前端：Git 提交 `f7d937a`，先於 GAS 上線；線上 `storefront.js` 已確認包含 requestId 與 sessionStorage 重送識別。
+- 正式 GAS：第 35 版，沿用原 Web App URL；第 34 版保留為回滾點。
+- 已執行 `setupQuokkaPreorder()`，預先建立 `OrderRequestIds` 防重送索引表；執行記錄顯示完成。
+- 正式唯讀健康檢查：商品目錄 `ok:true`，讀到 38 個商品。
+- 正式壓測保護檢查：`formalSimulationHandshake` 回 `STRESS_TEST_DISABLED`；正式環境未設定 `ENABLE_STRESS_TEST_MODE`。
+- 未建立人工正式訂單，因此沒有為部署驗證而產生 LINE 通知、扣庫存或測試顧客資料。
 
 ## 本機驗證
 
@@ -70,10 +79,8 @@ node --check tests/run-live-formal-simulation.js
 
 共 63 個自動測試通過，線上模擬執行器亦通過語法檢查。
 
-## 尚未完成與正式部署條件
+## 已知限制與回滾
 
-1. 本次沒有部署正式 GAS，也沒有部署含 requestId 的正式前端。
-2. 正式上線順序必須先部署前端 requestId，再部署要求 requestId 的 GAS；直接只更新後端會讓舊前端送單失敗。
-3. 取消回庫已依確認後的規則完成：有限庫存加回、無限庫存保持空白、重複取消不重複加回。
-4. LINE 仍在鎖外且新訂單只呼叫一次；若程序在訂單寫入後、LINE 發送前中斷，重送會回原訂單但不補發 LINE，可能出現少數漏通知，需另行設計可追蹤通知佇列。
-5. 正式部署前應備份 Apps Script 版本、確認 `OrderRequestIds` 新工作表可建立，並安排安全驗證。
+1. 取消回庫已依確認後的規則完成：有限庫存加回、無限庫存保持空白、重複取消不重複加回。
+2. LINE 仍在鎖外且新訂單只呼叫一次；若程序在訂單寫入後、LINE 發送前中斷，重送會回原訂單但不補發 LINE，可能出現少數漏通知，需另行設計可追蹤通知佇列。
+3. GAS 回滾：在部署管理將正式 Web App 改回第 34 版。前端回滾：將 GitHub `main` 回復到 `50791f1`。`OrderRequestIds` 可保留，不會影響第 34 版。
