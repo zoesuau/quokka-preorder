@@ -15,7 +15,7 @@
 - 後台可一鍵停賣，前台以遮罩顯示「本次連線已結束」公告，後端同步停止收單
 - LINE 身分驗證、預購送單與顯示全部歷史訂單的「我的預購」
 - 賣場開設後顯示 iOPEN Mall 連結，付款期限日數可由系統設定調整
-- 手機商品後台：拍照／相簿上傳、建立、編輯、上架／缺貨
+- 手機商品後台：拍照／相簿上傳、建立、編輯，並可從商品卡片直接調整庫存與上下架
 - 獨立系統設定頁：前台內容、共用計價、訂金規則、iOPEN Mall、停賣公告與後台登入碼
 - 已收訂金訂單可取消缺貨品項，保留原始金額與調整紀錄，並自動計算後續應付或出貨時待退現金
 - 待收訂金與已收到訂金可由後台編輯／調整商品；保留最近異動、完整歷史與 LINE 訂單資訊卡片
@@ -26,6 +26,7 @@
 - LINE 訂單通知統一使用訂購系統色系的 Flex Message 卡片
 - GAS 伺服器端重新驗證商品、款式與金額
 - Google Sheet 商品及預購紀錄
+- 後台可下載完整訂單 CSV，並依 LINE User ID（缺少時以電話）去重匯出客戶資料；匯出前會重新驗證管理員且不受畫面篩選影響
 
 ## 檔案
 
@@ -72,8 +73,11 @@
 ## 驗證
 
 - `node tests/order-adjustment.test.js`：驗證訂金重算、保留已回報／已收訂金、溢付、狀態限制、下架商品、重複送出與同時修改保護。
+- `node tests/product-card-controls.test.js`：驗證商品卡片的庫存快選、自訂數量、上下架控制與觸控尺寸契約。
+- `node tests/line-notification-style.test.js`：驗證成立、付款提醒、收到訂金、賣場按鈕與取消卡片的 LINE Flex Message 樣式。
 - `node tests/stress-test.test.js`：驗證壓測開關、獨立工作表、假資料限制、冪等性及正式訂單／商品隔離。
 - `node tests/stress-test-ui.test.js`：驗證 20 筆上限、測試 payload、重複請求及安全握手限制。
+- `node tests/admin-export.test.js`：驗證訂單完整匯出、客戶去重統計、管理員驗證與 CSV 公式注入防護。
 - `tests/run-live-formal-simulation.js`：只供人工授權後，對隔離 GAS 測試部署執行 1–20 筆正式流程模擬；不得指向正式部署。
 - `LOAD_TEST_REPORT_2026-08-01.md`：2026-08-01 的 5／10／20 筆正式流程隔離模擬結果與安全核對。
 - `tests/order-adjustment-preview.html`：訂單卡片及調整視窗的安全假資料視覺檢查頁。

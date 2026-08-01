@@ -66,6 +66,8 @@ function bindAdminEvents() {
   document.getElementById("orderEditorClose").addEventListener("click", () => document.getElementById("orderEditorDialog").close());
   document.getElementById("orderSearch").addEventListener("input", renderAdminOrders);
   document.getElementById("orderStatusFilter").addEventListener("change", renderAdminOrders);
+  document.getElementById("exportOrders").addEventListener("click", (event) => exportAdminData("orders", event.currentTarget));
+  document.getElementById("exportCustomers").addEventListener("click", (event) => exportAdminData("customers", event.currentTarget));
   document.querySelector(".admin-page-tabs").addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-page]");
     if (button) switchAdminPage(button.dataset.adminPage);
@@ -174,6 +176,37 @@ function renderPurchaseSummary() {
   document.getElementById("purchaseItemList").innerHTML = summary.items?.length
     ? summary.items.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong>${item.variant ? `<small>${escapeHtml(item.variant)}</small>` : ""}</span><b>× ${formatNumber(item.qty)}</b></div>`).join("")
     : `<p>目前還沒有已收訂金的訂單。</p>`;
+}
+
+async function exportAdminData(exportType, button) {
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "準備下載…";
+  try {
+    const result = await adminPost({ action: "adminExportData", exportType });
+    if (!result.ok || typeof result.csv !== "string") throw new Error(result.error || "EXPORT_FAILED");
+    downloadCsv(result.fileName || `${exportType}.csv`, result.csv);
+    showToast(`已匯出 ${formatNumber(result.rowCount)} 筆${exportType === "orders" ? "訂單" : "客戶"}資料`);
+  } catch (error) {
+    if (error.message === "INVALID_EXPORT_TYPE") showToast("匯出類型不正確");
+    else showToast("資料匯出失敗，請重新整理後再試");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+function downloadCsv(fileName, csv) {
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = String(fileName || "export.csv").replace(/[\\/:*?"<>|]/g, "-");
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function renderAdminOrders() {

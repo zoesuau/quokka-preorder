@@ -9,9 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css?v=20260801-product-inventory" />
-    <link rel="stylesheet" href="admin.css?v=20260801-direct-product-controls" />
+    <link rel="stylesheet" href="admin.css?v=20260801-data-export" />
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260801-direct-product-controls" defer></script>
+    <script src="admin.js?v=20260801-data-export" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -138,6 +138,15 @@
           <label class="field"><span>再次輸入新登入碼</span><input id="confirmAdminAccessCode" type="password" minlength="6" maxlength="64" autocomplete="new-password" required /></label>
           <button class="secondary-button" type="submit">變更後台登入碼</button>
         </form>
+
+        <section class="admin-export-card" aria-labelledby="adminExportTitle">
+          <div class="purchase-summary-heading"><div><p class="eyebrow">DATA EXPORT</p><h2 id="adminExportTitle">匯出資料</h2></div><span>完整資料，不受篩選影響</span></div>
+          <p>下載目前試算表中的完整正式訂單，或依顧客身分整理後的客戶清單。</p>
+          <div class="admin-export-actions">
+            <button id="exportOrders" type="button">下載訂單資料</button>
+            <button id="exportCustomers" type="button">下載客戶資料</button>
+          </div>
+        </section>
       </section>
       </div>
     </main>

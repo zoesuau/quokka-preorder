@@ -68,6 +68,64 @@ var ORDER_HEADERS_ = [
   "iopenMallPaymentDeadlineAt",
 ];
 
+var ORDER_EXPORT_HEADERS_ = [
+  "訂單編號",
+  "建立時間",
+  "LINE User ID",
+  "LINE 顯示名稱",
+  "訂購人姓名",
+  "電話",
+  "商品明細 JSON",
+  "商品摘要",
+  "商品總件數",
+  "商品總額",
+  "訂金",
+  "剩餘商品款",
+  "付款方式",
+  "匯款末五碼",
+  "備註",
+  "訂單狀態",
+  "社群身分 ID",
+  "賣場狀態",
+  "開設賣場時間",
+  "訂金提醒時間",
+  "取消時間",
+  "賣場逾期提醒時間",
+  "原始商品明細 JSON",
+  "原始商品總額",
+  "缺貨調整 JSON",
+  "缺貨調整時間",
+  "待退現金",
+  "現金退款完成時間",
+  "缺貨通知時間",
+  "顧客回報付款時間",
+  "訂單調整 JSON",
+  "訂單調整時間",
+  "訂單調整通知時間",
+  "訂單版本",
+  "訂金比例",
+  "訂金提醒起始時間",
+  "顧客付款期限",
+  "系統自動取消時間",
+  "賣場付款期限天數",
+  "賣場付款期限",
+];
+
+var CUSTOMER_EXPORT_HEADERS_ = [
+  "LINE User ID",
+  "LINE 顯示名稱",
+  "訂購人姓名",
+  "電話",
+  "首次下單時間",
+  "最近下單時間",
+  "總訂單數",
+  "有效訂單數",
+  "取消訂單數",
+  "完成訂單數",
+  "有效訂單累計金額",
+  "最近訂單狀態",
+];
+
 var ORDER_REQUEST_SHEET_NAME_ = "OrderRequestIds";
 var ORDER_REQUEST_HEADERS_ = [
   "requestId",
@@ -213,6 +271,7 @@ function doPost(e) {
     if (action === "readMyPreorders") return handleReadMyPreorders_(data);
     if (action === "adminLogin") return handleAdminLogin_(data);
     if (action === "adminReadProducts") return handleAdminReadProducts_(data);
+    if (action === "adminExportData") return handleAdminExportData_(data);
     if (action === "adminUpdateOrderStatus")
       return handleAdminUpdateOrderStatus_(data);
     if (action === "adminCancelOrder") return handleAdminCancelOrder_(data);
@@ -1699,13 +1758,19 @@ function buildOrderSuccessMessage_(order) {
   };
 }
 
-function moneyRow_(label, value, valueColor) {
+function moneyRow_(label, value, valueColor, labelColor) {
   return {
     type: "box",
     layout: "horizontal",
     margin: "md",
     contents: [
-      { type: "text", text: label, size: "sm", color: "#75858D", flex: 3 },
+      {
+        type: "text",
+        text: label,
+        size: "sm",
+        color: labelColor || "#75858D",
+        flex: 3,
+      },
       {
         type: "text",
         text: value,
@@ -1721,56 +1786,86 @@ function moneyRow_(label, value, valueColor) {
 
 function buildUnifiedOrderCard_(order, title, message, options) {
   options = options || {};
+  function themedMoneyRow_(label, value, valueColor) {
+    return moneyRow_(
+      label,
+      value,
+      valueColor || options.valueColor,
+      options.labelColor,
+    );
+  }
+  var messageContent = {
+    type: "text",
+    text: String(message || ""),
+    wrap: true,
+    weight: "bold",
+    size: "sm",
+    color:
+      options.messageColor || (options.warning ? "#EF0025" : "#25343B"),
+  };
+  if (options.messageBackgroundColor) {
+    messageContent = {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "14px",
+      cornerRadius: "10px",
+      backgroundColor: options.messageBackgroundColor,
+      contents: [messageContent],
+    };
+  }
   var body = [
+    messageContent,
     {
-      type: "text",
-      text: String(message || ""),
-      wrap: true,
-      weight: "bold",
-      size: "sm",
-      color: options.warning ? "#EF0025" : "#25343B",
+      type: "separator",
+      margin: "lg",
+      color: options.separatorColor || "#C8D8DF",
     },
-    { type: "separator", margin: "lg", color: "#C8D8DF" },
-    moneyRow_("訂購人", order.customerName || "—"),
-    moneyRow_("訂單時間", order.createdAt || "—"),
+    themedMoneyRow_("訂購人", order.customerName || "—"),
+    themedMoneyRow_("訂單時間", order.createdAt || "—"),
     {
       type: "text",
       text: String(order.itemsSummary || "目前沒有商品明細").slice(0, 1800),
       wrap: true,
       size: "sm",
       margin: "lg",
-      color: "#25343B",
+      color: options.itemTextColor || "#25343B",
     },
-    { type: "separator", margin: "lg", color: "#C8D8DF" },
+    {
+      type: "separator",
+      margin: "lg",
+      color: options.separatorColor || "#C8D8DF",
+    },
   ];
   if (Array.isArray(options.moneyRows)) {
     options.moneyRows.forEach(function (row) {
-      body.push(moneyRow_(row.label, row.value, row.color));
+      body.push(themedMoneyRow_(row.label, row.value, row.color));
     });
   } else {
     if (order.totalQty !== undefined)
-      body.push(moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"));
+      body.push(
+        themedMoneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
+      );
     if (order.estimatedTotal !== undefined)
       body.push(
-        moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
+        themedMoneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
       );
     if (order.depositTotal !== undefined)
       body.push(
-        moneyRow_(
+        themedMoneyRow_(
           options.depositLabel || "訂金",
           "NT$" + formatMoney_(order.depositTotal),
-          "#EF0025",
+          options.depositValueColor || "#EF0025",
         ),
       );
     if (order.estimatedBalance !== undefined)
       body.push(
-        moneyRow_(
+        themedMoneyRow_(
           options.balanceLabel || "後續應付",
           "NT$" + formatMoney_(order.estimatedBalance),
         ),
       );
     (options.extraRows || []).forEach(function (row) {
-      body.push(moneyRow_(row.label, row.value, row.color));
+      body.push(themedMoneyRow_(row.label, row.value, row.color));
     });
   }
 
@@ -1780,8 +1875,13 @@ function buildUnifiedOrderCard_(order, title, message, options) {
     contents: {
       type: "bubble",
       styles: {
-        header: { backgroundColor: "#47748E" },
-        footer: { separator: true, separatorColor: "#C8D8DF" },
+        header: {
+          backgroundColor: options.headerBackgroundColor || "#47748E",
+        },
+        footer: {
+          separator: true,
+          separatorColor: options.separatorColor || "#C8D8DF",
+        },
       },
       header: {
         type: "box",
@@ -1799,7 +1899,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
           {
             type: "text",
             text: order.orderNo,
-            color: "#F1C84B",
+            color: options.orderNoColor || "#F1C84B",
             weight: "bold",
             size: "sm",
             margin: "sm",
@@ -1810,7 +1910,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
         type: "box",
         layout: "vertical",
         paddingAll: "18px",
-        backgroundColor: "#FFFDF7",
+        backgroundColor: options.bodyBackgroundColor || "#FFFDF7",
         contents: body,
       },
     },
@@ -1825,7 +1925,10 @@ function buildUnifiedOrderCard_(order, title, message, options) {
         return {
           type: "button",
           style: index === 0 ? "primary" : "secondary",
-          color: index === 0 ? "#47748E" : undefined,
+          color:
+            index === 0
+              ? options.primaryButtonColor || "#47748E"
+              : undefined,
           height: "sm",
           action: button,
         };
@@ -1890,7 +1993,12 @@ function buildUnifiedDepositReceivedCard_(order) {
     order,
     "已收到訂金",
     "訂金已確認入帳，您的預訂已完成。",
-    { depositLabel: "已收訂金", balanceLabel: "回國後剩餘商品款" },
+    {
+      depositLabel: "已收訂金",
+      balanceLabel: "回國後剩餘商品款",
+      messageBackgroundColor: "#FFF0B8",
+      messageColor: "#805B00",
+    },
   );
 }
 
@@ -1908,6 +2016,7 @@ function buildUnifiedMallReadyCard_(order, iopenMallUrl) {
       " 前完成下標及付款。",
     {
       balanceLabel: "賣場應付金額",
+      primaryButtonColor: "#E45F47",
       buttons: iopenMallUrl
         ? [
             {
@@ -1924,9 +2033,13 @@ function buildUnifiedMallReadyCard_(order, iopenMallUrl) {
 function buildUnifiedReminderCard_(order, message, title, iopenMallUrl) {
   return buildUnifiedOrderCard_(order, title, message, {
     warning: true,
+    messageBackgroundColor: "#FBE6EA",
+    messageColor: "#C13E4D",
     depositLabel: "應付訂金",
     balanceLabel:
       title === "iOPEN Mall 付款提醒" ? "賣場應付金額" : "後續應付",
+    primaryButtonColor:
+      title === "iOPEN Mall 付款提醒" ? "#E45F47" : undefined,
     buttons:
       title === "iOPEN Mall 付款提醒" && iopenMallUrl
         ? [
@@ -1945,7 +2058,21 @@ function buildUnifiedCancellationCard_(order) {
     order,
     "預購訂單已取消",
     String(order.reason || "訂單已由管理員取消。"),
-    { warning: true, depositLabel: "原訂金", balanceLabel: "原後續應付" },
+    {
+      warning: true,
+      depositLabel: "原訂金",
+      balanceLabel: "原後續應付",
+      headerBackgroundColor: "#7C858A",
+      bodyBackgroundColor: "#F5F6F6",
+      orderNoColor: "#EEF0F1",
+      separatorColor: "#D7DCDE",
+      messageBackgroundColor: "#E4E6E7",
+      messageColor: "#A33F49",
+      labelColor: "#7B8388",
+      valueColor: "#596268",
+      depositValueColor: "#667178",
+      itemTextColor: "#596268",
+    },
   );
 }
 
@@ -2232,6 +2359,147 @@ function handleAdminReadProducts_(data) {
     settings: readSettings_(),
     purchaseSummary: readPurchaseSummary_(),
   });
+}
+
+function handleAdminExportData_(data) {
+  requireAdmin_(data.idToken, data.adminSessionToken);
+  setupQuokkaPreorder();
+  var exportType = String(data.exportType || "").trim();
+  var orderRows = readOrderExportRows_();
+  var stamp = Utilities.formatDate(
+    new Date(),
+    Session.getScriptTimeZone(),
+    "yyyyMMdd-HHmmss",
+  );
+  if (exportType === "orders") {
+    return json_({
+      ok: true,
+      exportType: exportType,
+      fileName: "orders-" + stamp + ".csv",
+      rowCount: orderRows.length,
+      csv: buildCsv_([ORDER_EXPORT_HEADERS_].concat(orderRows)),
+    });
+  }
+  if (exportType === "customers") {
+    var customerRows = buildCustomerExportRows_(orderRows);
+    return json_({
+      ok: true,
+      exportType: exportType,
+      fileName: "customers-" + stamp + ".csv",
+      rowCount: customerRows.length,
+      csv: buildCsv_([CUSTOMER_EXPORT_HEADERS_].concat(customerRows)),
+    });
+  }
+  throw new Error("INVALID_EXPORT_TYPE");
+}
+
+function readOrderExportRows_() {
+  var sheet = spreadsheet_().getSheetByName("Preorders");
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
+    .getDisplayValues()
+    .filter(function (row) {
+      return String(row[0] || "").trim();
+    });
+}
+
+function buildCustomerExportRows_(orderRows) {
+  var customers = {};
+  (orderRows || []).forEach(function (row, rowIndex) {
+    var lineUserId = String(row[2] || "").trim();
+    var normalizedPhone = String(row[5] || "").replace(/\D/g, "");
+    var fallbackIdentity =
+      String(row[4] || "").trim() + "|" + String(row[3] || "").trim();
+    var key = lineUserId
+      ? "line:" + lineUserId
+      : normalizedPhone
+        ? "phone:" + normalizedPhone
+        : "name:" + fallbackIdentity;
+    var createdAtText = String(row[1] || "").trim();
+    var createdAt = parseOrderDate_(createdAtText);
+    var createdAtValue = createdAt ? createdAt.getTime() : rowIndex;
+    var status = normalizeOrderStatus_(row[15], row[17]);
+    var isCancelled = status === ORDER_STATUS_CANCELLED_;
+    var customer = customers[key];
+    if (!customer) {
+      customer = customers[key] = {
+        lineUserId: lineUserId,
+        lineDisplayName: "",
+        customerName: "",
+        phone: "",
+        firstOrderAt: createdAtText,
+        firstOrderValue: createdAtValue,
+        lastOrderAt: createdAtText,
+        lastOrderValue: createdAtValue,
+        orderCount: 0,
+        activeOrderCount: 0,
+        cancelledOrderCount: 0,
+        completedOrderCount: 0,
+        activeOrderTotal: 0,
+        latestStatus: status,
+      };
+    }
+    customer.orderCount += 1;
+    if (isCancelled) customer.cancelledOrderCount += 1;
+    else {
+      customer.activeOrderCount += 1;
+      customer.activeOrderTotal += number_(row[9]);
+    }
+    if (status === ORDER_STATUS_COMPLETED_) customer.completedOrderCount += 1;
+    if (createdAtValue < customer.firstOrderValue) {
+      customer.firstOrderAt = createdAtText;
+      customer.firstOrderValue = createdAtValue;
+    }
+    if (createdAtValue >= customer.lastOrderValue) {
+      customer.lastOrderAt = createdAtText;
+      customer.lastOrderValue = createdAtValue;
+      customer.latestStatus = status;
+      customer.lineDisplayName =
+        String(row[3] || "").trim() || customer.lineDisplayName;
+      customer.customerName =
+        String(row[4] || "").trim() || customer.customerName;
+      customer.phone = String(row[5] || "").trim() || customer.phone;
+      customer.lineUserId = lineUserId || customer.lineUserId;
+    }
+  });
+  return Object.keys(customers)
+    .map(function (key) {
+      return customers[key];
+    })
+    .sort(function (a, b) {
+      return b.lastOrderValue - a.lastOrderValue;
+    })
+    .map(function (customer) {
+      return [
+        customer.lineUserId,
+        customer.lineDisplayName,
+        customer.customerName,
+        customer.phone,
+        customer.firstOrderAt,
+        customer.lastOrderAt,
+        customer.orderCount,
+        customer.activeOrderCount,
+        customer.cancelledOrderCount,
+        customer.completedOrderCount,
+        customer.activeOrderTotal,
+        customer.latestStatus,
+      ];
+    });
+}
+
+function buildCsv_(rows) {
+  return (rows || [])
+    .map(function (row) {
+      return (row || []).map(csvCell_).join(",");
+    })
+    .join("\r\n");
+}
+
+function csvCell_(value) {
+  var text = value == null ? "" : String(value);
+  if (/^[\t\r ]*[=+\-@]/.test(text)) text = "'" + text;
+  return '"' + text.replace(/"/g, '""') + '"';
 }
 
 function readAdminOrders_() {
@@ -4847,6 +5115,7 @@ function safeError_(error) {
     "ADMIN_ACCESS_CODE_MISSING",
     "ADMIN_LOGIN_FAILED",
     "INVALID_ACCESS_CODE",
+    "INVALID_EXPORT_TYPE",
     "LINE_LOGIN_REQUIRED",
     "LINE_CONFIG_MISSING",
     "LINE_TOKEN_INVALID",
