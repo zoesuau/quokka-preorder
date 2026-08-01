@@ -106,3 +106,15 @@ node --check tests/run-live-formal-simulation.js
 - 自動驗證：共 92 個測試通過，另完成 JavaScript 語法檢查與 `git diff --check`。
 - 正式唯讀健康檢查：商品目錄回傳 `ok:true`，正常讀到 36 個公開商品與系統設定。
 - 回滾：GAS 可在部署管理改回第 39 版；前端可將 GitHub `main` 回復到 `e5dd5ba`。
+
+## 2026-08-02 Echo 款式個別庫存與照片部署
+
+- 母體功能提交：`1a16088`；Echo 正式前端提交：`0905570`。
+- Echo GAS：第 4 版，沿用原 Web App 部署 ID 與網址；第 3 版保留為回滾點。
+- 部署內容：同一商品可選擇啟用款式個別庫存，為每個款式設定名稱、庫存與照片；前台會依款式顯示照片、售罄狀態並限制可購數量。
+- 客戶設定保護：Echo 專屬 `config.js`、LIFF、GAS 網址與品牌設定未修改。
+- 資料相容：`Products` 僅在後台首次完成驗證並讀取資料時附加 `variantOptionsJson` 欄位；既有商品預設繼續使用原總庫存，舊版程式會忽略新增欄位。
+- 資料安全：部署驗證未建立訂單、未修改商品、庫存或顧客資料，也未發送 LINE 通知。當時公開商品目錄為空，與店家已先下架商品的狀態一致。
+- 自動驗證：共 112 個測試通過，另完成 JavaScript／GAS 語法檢查、`git diff --check`、行動版視覺檢查。
+- 正式唯讀健康檢查：Cloudflare 已載入 `20260802-variant-inventory`；正式 `admin.js` 與 `storefront.js` 和提交內容逐位元一致；GAS 商品目錄回傳 `ok:true`。
+- 回滾：GAS 可在部署管理改回第 3 版；Echo 前端可回復到 `6501fbb`。新增空白欄位可以保留，不影響回滾版本。
