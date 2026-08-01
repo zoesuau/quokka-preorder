@@ -26,8 +26,23 @@
         </section>
         <label class="field"><span>商品名稱 *</span><input value="橡皮擦組＋棉花糖外殼吊飾" /></label>
         <label class="field"><span>分類 *</span><select><option selected>棒球系列</option><option>吊飾</option><option>＋ 新增分類</option></select></label>
-        <label class="field"><span>庫存數量 *</span><input type="number" value="10" /><small class="field-help">庫存為 0 時會自動下架；增加庫存後仍可自行選擇是否重新上架。</small></label>
-        <label class="field"><span>款式（選填）</span><textarea rows="2">QUOKKA、BOBO</textarea></label>
+        <section class="variant-options-editor">
+          <div class="variant-options-heading"><div><span>款式個別庫存與照片</span><small>同售價的顏色、尺寸或角色可分別管理</small></div></div>
+          <div class="variant-option-list">
+            <article class="variant-option-item">
+              <button class="variant-photo-button" type="button"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect width='200' height='200' fill='%23d8b465'/%3E%3Ccircle cx='100' cy='100' r='58' fill='%23a86b33'/%3E%3C/svg%3E" alt="QUOKKA" /></button>
+              <div class="variant-option-fields"><label><span>款式名稱 *</span><input value="QUOKKA" /></label><label><span>庫存 *</span><input type="number" value="3" /></label></div>
+              <button class="variant-photo-remove" type="button">移除照片</button><button class="variant-option-remove" type="button">×</button>
+            </article>
+            <article class="variant-option-item">
+              <button class="variant-photo-button" type="button"><span>＋ 照片</span></button>
+              <div class="variant-option-fields"><label><span>款式名稱 *</span><input value="BOBO" /></label><label><span>庫存 *</span><input type="number" value="5" /></label></div>
+              <button class="variant-option-remove" type="button">×</button>
+            </article>
+          </div>
+          <div class="variant-options-actions"><button type="button">＋ 新增款式</button><button id="disableVariantInventory" type="button">改回商品總庫存</button></div>
+          <small class="field-help">商品總庫存 8 件。單一款式為 0 時只停售該款式；全部為 0 才會下架商品。</small>
+        </section>
         <section class="product-price-calculator">
           <label class="field"><span>韓幣售價</span><input type="number" value="11000" /></label>
           <div class="calculator-rule"><span>共用費率 <b>0.025</b></span><span>固定加價 <b>NT$50</b></span></div>

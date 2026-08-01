@@ -180,8 +180,17 @@
         <label class="field"><span>商品名稱 *</span><input id="productName" required maxlength="100" placeholder="例如：矮袋鼠露營鑰匙圈" /></label>
         <label class="field"><span>分類 *</span><select id="productCategory" required></select></label>
         <label class="field new-category-field" id="newCategoryField" hidden><span>新增分類名稱 *</span><input id="productNewCategory" maxlength="30" placeholder="輸入後會記住並加入下拉選單" /></label>
-        <label class="field"><span>庫存數量 *</span><input id="productStockQuantity" required type="number" min="0" max="999999" step="1" inputmode="numeric" placeholder="例如：10" /><small class="field-help">庫存為 0 時會自動下架；增加庫存後仍可自行選擇是否重新上架。</small></label>
-        <label class="field"><span>款式（選填）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="例如：QUOKKA、BOBO（用逗號或換行分隔）"></textarea><small class="field-help">同一商品有多個角色、顏色或尺寸，且售價相同時才填寫；只有一種款式可留白，不同售價或不同販售狀態請分開建立商品。</small></label>
+        <label class="field" id="productStockField"><span>商品總庫存 *</span><input id="productStockQuantity" required type="number" min="0" max="999999" step="1" inputmode="numeric" placeholder="例如：10" /><small class="field-help">沒有啟用款式個別庫存時使用；庫存為 0 會自動下架。</small></label>
+        <section class="variant-options-editor" aria-labelledby="variantOptionsTitle">
+          <div class="variant-options-heading"><div><span id="variantOptionsTitle">款式個別庫存與照片</span><small>同售價的顏色、尺寸或角色可分別管理</small></div><button id="enableVariantInventory" type="button">啟用個別庫存</button></div>
+          <label class="field" id="legacyVariantField"><span>款式名稱（選填）</span><textarea id="productVariants" rows="2" maxlength="300" placeholder="例如：QUOKKA、BOBO（用逗號或換行分隔）"></textarea><small class="field-help">沿用舊版總庫存；若每個款式數量或照片不同，請啟用個別庫存。</small></label>
+          <div id="variantOptionsPanel" hidden>
+            <div class="variant-option-list" id="variantOptionList"></div>
+            <div class="variant-options-actions"><button id="addVariantOption" type="button">＋ 新增款式</button><button id="disableVariantInventory" type="button">改回商品總庫存</button></div>
+            <small class="field-help">商品總庫存會自動加總。單一款式為 0 時只停售該款式；全部為 0 才會下架商品。照片未設定時沿用商品封面。</small>
+          </div>
+          <input id="variantImageInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+        </section>
         <section class="product-price-calculator">
           <label class="field"><span>韓幣售價</span><input id="productKrwPrice" type="number" min="0" step="1" inputmode="numeric" placeholder="輸入後自動計算台幣售價" /></label>
           <div class="calculator-rule"><span>共用費率 <b id="productExchangeRatePreview">—</b></span><span>固定加價 <b id="productFixedMarkupPreview">—</b></span></div>

@@ -2,7 +2,7 @@ const CONFIG = window.QUOKKA_CONFIG || {};
 const IOPEN_MALL_READY_STATUS = "已開設 iOPEN Mall 賣場";
 const PAYMENT_REPORTED_STATUS = "待確認訂金";
 const ORDER_COMPLETED_STATUS = "訂單已完成";
-const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, editorImageUrls: [] };
+const adminState = { products: [], orders: [], settings: {}, purchaseSummary: { orderCount: 0, totalQty: 0, items: [] }, idToken: "", sessionToken: "", uploadBusy: false, editorImageUrls: [], editorVariantOptions: [], variantInventoryEnabled: false, variantImageTarget: -1 };
 const demoPlaceholder = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#eee6df"/><text x="200" y="210" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9b8b7e">NO IMAGE</text></svg>`)}`;
 
 document.addEventListener("DOMContentLoaded", initAdmin);
@@ -46,6 +46,12 @@ function bindAdminEvents() {
   document.getElementById("productKrwPrice").addEventListener("input", calculateProductTwdPrice);
   document.getElementById("productImageInput").addEventListener("change", uploadSelectedImage);
   document.getElementById("productImageList").addEventListener("click", handleEditorImageAction);
+  document.getElementById("enableVariantInventory").addEventListener("click", enableVariantInventory);
+  document.getElementById("disableVariantInventory").addEventListener("click", disableVariantInventory);
+  document.getElementById("addVariantOption").addEventListener("click", () => addVariantOption());
+  document.getElementById("variantOptionList").addEventListener("input", updateVariantOptionValue);
+  document.getElementById("variantOptionList").addEventListener("click", handleVariantOptionAction);
+  document.getElementById("variantImageInput").addEventListener("change", uploadVariantImage);
   document.getElementById("productCategory").addEventListener("change", updateNewCategoryField);
   document.getElementById("productForm").addEventListener("submit", saveProduct);
   document.getElementById("archiveProduct").addEventListener("click", openProductArchiveDialog);
@@ -848,6 +854,117 @@ function renderEditorImages() {
   document.querySelector(".product-images-editor .image-uploader").classList.toggle("is-full", adminState.editorImageUrls.length >= 10);
 }
 
+function createEditorVariantOption(source = {}) {
+  return {
+    id: String(source.id || ""),
+    name: String(source.name || ""),
+    stockQuantity: source.stockQuantity === "" || source.stockQuantity == null ? "" : Number(source.stockQuantity),
+    imageUrl: String(source.imageUrl || ""),
+  };
+}
+
+function renderVariantOptions() {
+  const enabled = adminState.variantInventoryEnabled;
+  document.getElementById("variantOptionsPanel").hidden = !enabled;
+  document.getElementById("legacyVariantField").hidden = enabled;
+  document.getElementById("enableVariantInventory").hidden = enabled;
+  document.getElementById("productStockField").hidden = enabled;
+  document.getElementById("productStockQuantity").required = !enabled;
+  document.getElementById("variantOptionList").innerHTML = adminState.editorVariantOptions.map((option, index) => {
+    const photo = option.imageUrl
+      ? `<img src="${escapeAttr(option.imageUrl)}" alt="${escapeAttr(option.name || `款式 ${index + 1}`)}" />`
+      : '<span>＋ 照片</span>';
+    return `<article class="variant-option-item" data-variant-index="${index}">
+      <button class="variant-photo-button" type="button" data-variant-photo="${index}" aria-label="設定款式照片">${photo}</button>
+      <div class="variant-option-fields">
+        <label><span>款式名稱 *</span><input data-variant-name="${index}" maxlength="50" required value="${escapeAttr(option.name)}" placeholder="例如：黑色" /></label>
+        <label><span>庫存 *</span><input data-variant-stock="${index}" type="number" min="0" max="999999" step="1" inputmode="numeric" required value="${escapeAttr(option.stockQuantity)}" /></label>
+      </div>
+      ${option.imageUrl ? `<button class="variant-photo-remove" type="button" data-variant-photo-remove="${index}">移除照片</button>` : ""}
+      <button class="variant-option-remove" type="button" data-variant-remove="${index}" aria-label="刪除此款式">×</button>
+    </article>`;
+  }).join("");
+  const total = adminState.editorVariantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0);
+  document.getElementById("productStockQuantity").value = enabled ? total : document.getElementById("productStockQuantity").value;
+}
+
+function enableVariantInventory() {
+  const legacyNames = parseVariants(document.getElementById("productVariants").value);
+  adminState.variantInventoryEnabled = true;
+  adminState.editorVariantOptions = legacyNames.length
+    ? legacyNames.map((name) => createEditorVariantOption({ name, stockQuantity: "" }))
+    : [createEditorVariantOption({ stockQuantity: 0 })];
+  renderVariantOptions();
+  if (legacyNames.length) showToast("請為每個舊款式填入庫存；原總庫存不會自動拆分");
+}
+
+function disableVariantInventory() {
+  if (!confirm("改回商品總庫存後，款式的個別庫存與照片不會保留。要繼續嗎？")) return;
+  document.getElementById("productVariants").value = adminState.editorVariantOptions.map((option) => option.name.trim()).filter(Boolean).join(", ");
+  const total = adminState.editorVariantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0);
+  document.getElementById("productStockQuantity").value = total;
+  adminState.variantInventoryEnabled = false;
+  adminState.editorVariantOptions = [];
+  renderVariantOptions();
+}
+
+function addVariantOption() {
+  if (adminState.editorVariantOptions.length >= 30) return showToast("每個商品最多 30 個款式");
+  adminState.editorVariantOptions.push(createEditorVariantOption({ stockQuantity: 0 }));
+  renderVariantOptions();
+  document.querySelector(`[data-variant-name="${adminState.editorVariantOptions.length - 1}"]`)?.focus({ preventScroll: true });
+}
+
+function updateVariantOptionValue(event) {
+  const nameInput = event.target.closest("[data-variant-name]");
+  const stockInput = event.target.closest("[data-variant-stock]");
+  if (!nameInput && !stockInput) return;
+  const index = Number((nameInput || stockInput).dataset[nameInput ? "variantName" : "variantStock"]);
+  if (!adminState.editorVariantOptions[index]) return;
+  if (nameInput) adminState.editorVariantOptions[index].name = nameInput.value;
+  if (stockInput) adminState.editorVariantOptions[index].stockQuantity = stockInput.value;
+  if (stockInput) document.getElementById("productStockQuantity").value = adminState.editorVariantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0);
+}
+
+function handleVariantOptionAction(event) {
+  const photoButton = event.target.closest("[data-variant-photo]");
+  if (photoButton) {
+    adminState.variantImageTarget = Number(photoButton.dataset.variantPhoto);
+    return document.getElementById("variantImageInput").click();
+  }
+  const photoRemove = event.target.closest("[data-variant-photo-remove]");
+  if (photoRemove) {
+    adminState.editorVariantOptions[Number(photoRemove.dataset.variantPhotoRemove)].imageUrl = "";
+    return renderVariantOptions();
+  }
+  const removeButton = event.target.closest("[data-variant-remove]");
+  if (!removeButton) return;
+  adminState.editorVariantOptions.splice(Number(removeButton.dataset.variantRemove), 1);
+  if (!adminState.editorVariantOptions.length) adminState.editorVariantOptions.push(createEditorVariantOption({ stockQuantity: 0 }));
+  renderVariantOptions();
+}
+
+async function uploadVariantImage(event) {
+  const file = event.target.files?.[0];
+  const index = adminState.variantImageTarget;
+  if (!file || index < 0 || !adminState.editorVariantOptions[index]) return;
+  adminState.uploadBusy = true;
+  try {
+    const compressed = await compressImage(file, 1200, .82);
+    const result = await adminPost({ action: "adminUploadProductImage", fileName: file.name, mimeType: "image/jpeg", base64Data: compressed.dataUrl.split(",")[1] });
+    if (!result.ok) throw new Error(result.error || "UPLOAD_FAILED");
+    adminState.editorVariantOptions[index].imageUrl = result.imageUrl;
+    renderVariantOptions();
+    showToast("款式照片上傳完成");
+  } catch (error) {
+    showToast("款式照片上傳失敗，請換一張再試");
+  } finally {
+    adminState.uploadBusy = false;
+    adminState.variantImageTarget = -1;
+    event.target.value = "";
+  }
+}
+
 function handleEditorImageAction(event) {
   const coverButton = event.target.closest("[data-image-cover]");
   if (coverButton) {
@@ -901,7 +1018,12 @@ function openEditor(product = null) {
     ? "恢復後會先保持下架，確認內容與庫存後再手動上架。"
     : "商品會從日常列表與客人頁面移除，但保留既有訂單資料。";
   adminState.editorImageUrls = productImageUrls(product);
+  adminState.variantInventoryEnabled = Boolean(product?.variantInventoryEnabled && Array.isArray(product?.variantOptions) && product.variantOptions.length);
+  adminState.editorVariantOptions = adminState.variantInventoryEnabled
+    ? product.variantOptions.map(createEditorVariantOption)
+    : [];
   renderEditorImages();
+  renderVariantOptions();
   updateNewCategoryField();
   updateAdminPricePreview();
   document.getElementById("productEditor").showModal();
@@ -975,6 +1097,11 @@ async function handleProductAction(event) {
 
 function openStockEditor(product) {
   if (!product) return;
+  if (product.variantInventoryEnabled) {
+    openEditor(product);
+    showToast("此商品使用款式個別庫存，請在各款式中調整");
+    return;
+  }
   document.getElementById("stockEditorProductId").value = product.id;
   document.getElementById("stockEditorProduct").textContent = product.name;
   document.getElementById("stockEditorQuantity").value = product.stockQuantity ?? "";
@@ -1072,22 +1199,40 @@ async function saveProduct(event) {
   try {
     const categorySelection = document.getElementById("productCategory").value;
     const stockValue = document.getElementById("productStockQuantity").value;
+    const variantOptions = adminState.variantInventoryEnabled
+      ? adminState.editorVariantOptions.map((option) => ({
+          id: option.id,
+          name: option.name.trim(),
+          stockQuantity: Number(option.stockQuantity),
+          imageUrl: option.imageUrl,
+        }))
+      : [];
+    const effectiveStock = adminState.variantInventoryEnabled
+      ? variantOptions.reduce((sum, option) => sum + (Number(option.stockQuantity) || 0), 0)
+      : Number(stockValue);
     const product = {
       id: document.getElementById("productId").value,
       name: document.getElementById("productName").value.trim(),
       category: (categorySelection === "__new__" ? document.getElementById("productNewCategory").value : categorySelection).trim(),
       imageUrl: adminState.editorImageUrls[0] || "",
       imageUrls: [...adminState.editorImageUrls],
-      stockQuantity: Number(stockValue),
+      stockQuantity: effectiveStock,
       krwPrice: Number(document.getElementById("productKrwPrice").value || 0),
       priceTwd: Number(document.getElementById("productTwdPrice").value),
       variants: parseVariants(document.getElementById("productVariants").value),
+      variantInventoryEnabled: adminState.variantInventoryEnabled,
+      variantOptions,
       description: document.getElementById("productDescription").value.trim(),
       sortOrder: Number(document.getElementById("productSortOrder").value || 0),
-      active: document.getElementById("productStatus").value === "active" && Number(stockValue) > 0,
+      active: document.getElementById("productStatus").value === "active" && effectiveStock > 0,
     };
     if (!product.imageUrl) throw new Error("IMAGE_REQUIRED");
     if (!product.category) throw new Error("CATEGORY_REQUIRED");
+    if (adminState.variantInventoryEnabled) {
+      if (!variantOptions.length || variantOptions.some((option) => !option.name || !Number.isInteger(option.stockQuantity) || option.stockQuantity < 0)) throw new Error("VARIANT_REQUIRED");
+      const normalizedNames = variantOptions.map((option) => option.name.toLocaleLowerCase());
+      if (new Set(normalizedNames).size !== normalizedNames.length) throw new Error("VARIANT_DUPLICATE");
+    }
     const result = await adminPost({ action: "adminSaveProduct", product });
     if (!result.ok) throw new Error(result.error || "SAVE_FAILED");
     const index = adminState.products.findIndex((item) => item.id === result.product.id);
@@ -1098,7 +1243,8 @@ async function saveProduct(event) {
     renderAdminProducts();
     showToast("商品已儲存");
   } catch (error) {
-    showToast(error.message === "IMAGE_REQUIRED" ? "請先上傳至少一張商品照片" : error.message === "CATEGORY_REQUIRED" ? "請選擇或輸入分類" : "商品儲存失敗，請檢查欄位");
+    const messages = { IMAGE_REQUIRED: "請先上傳至少一張商品照片", CATEGORY_REQUIRED: "請選擇或輸入分類", VARIANT_REQUIRED: "請填寫每個款式的名稱與 0 以上整數庫存", VARIANT_DUPLICATE: "款式名稱不可重複" };
+    showToast(messages[error.message] || "商品儲存失敗，請檢查欄位");
   } finally {
     button.disabled = false;
     button.textContent = "儲存商品";

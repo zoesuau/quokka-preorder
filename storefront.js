@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-window.QUOKKA_APP_VERSION = "20260801-seven-eleven-full";
+window.QUOKKA_APP_VERSION = "20260802-variant-inventory";
 const state = {
   products: [],
   settings: { preorderNotice: "", depositPercent: 50, orderFlowMode: "mall_deposit", shippingFeeTwd: 60, saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
@@ -64,6 +64,7 @@ function ensureCatalogLoaded() {
 function bindEvents() {
   document.getElementById("saleClosedDialog").addEventListener("cancel", (event) => event.preventDefault());
   document.getElementById("addToCart").addEventListener("click", addSelectedProduct);
+  document.getElementById("dialogVariant").addEventListener("change", updateSelectedVariant);
   document.getElementById("openCheckout").addEventListener("click", openCheckout);
   document.getElementById("orderForm").addEventListener("submit", submitOrder);
   document.getElementById("myOrdersButton").addEventListener("click", showMyOrders);
@@ -261,6 +262,11 @@ function productImageUrls(product) {
   return [...new Set([...urls, product?.imageUrl].map((url) => String(url || "").trim()).filter(Boolean))].slice(0, 10);
 }
 
+function productVariantOptions(product) {
+  if (!product?.variantInventoryEnabled || !Array.isArray(product?.variantOptions)) return [];
+  return product.variantOptions.filter((option) => option && option.name);
+}
+
 function selectDialogImage(product, index) {
   const urls = productImageUrls(product);
   const selectedIndex = Math.max(0, Math.min(index, urls.length - 1));
@@ -287,20 +293,51 @@ function openProduct(id) {
   document.getElementById("dialogName").textContent = product.name;
   document.getElementById("dialogTwd").textContent = `售價 NT$${formatNumber(product.priceTwd)}`;
   document.getElementById("dialogDescription").textContent = product.description || "韓國旅途中現場代購商品";
+  const variantOptions = productVariantOptions(product);
   const variants = Array.isArray(product.variants) ? product.variants : parseVariants(product.variants);
   document.getElementById("variantField").hidden = variants.length === 0;
-  document.getElementById("dialogVariant").innerHTML = variants.map((variant) => `<option>${escapeHtml(variant)}</option>`).join("");
+  document.getElementById("dialogVariant").innerHTML = variantOptions.length
+    ? variantOptions.map((option) => `<option value="${escapeAttr(option.id)}" ${Number(option.stockQuantity) === 0 ? "disabled" : ""}>${escapeHtml(option.name)}${Number(option.stockQuantity) === 0 ? "（售罄）" : ""}</option>`).join("")
+    : variants.map((variant) => `<option value="${escapeAttr(variant)}">${escapeHtml(variant)}</option>`).join("");
   document.getElementById("dialogQty").value = "1";
+  updateSelectedVariant();
   document.getElementById("productDialog").showModal();
+}
+
+function updateSelectedVariant() {
+  const product = state.selectedProduct;
+  if (!product) return;
+  const options = productVariantOptions(product);
+  const selected = options.find((option) => option.id === document.getElementById("dialogVariant").value) || options.find((option) => Number(option.stockQuantity) > 0);
+  if (selected && document.getElementById("dialogVariant").value !== selected.id) document.getElementById("dialogVariant").value = selected.id;
+  if (selected?.imageUrl) {
+    const image = document.getElementById("dialogImage");
+    image.src = selected.imageUrl;
+    image.alt = `${product.name}，${selected.name}`;
+    document.querySelectorAll("[data-dialog-image]").forEach((button) => button.classList.remove("active"));
+  } else if (options.length) {
+    selectDialogImage(product, 0);
+  }
+  const available = selected ? Number(selected.stockQuantity) : product.stockQuantity == null ? 6 : Number(product.stockQuantity);
+  const currentInCart = state.cart.find((item) => item.productId === product.id && item.variantId === selected?.id)?.qty || 0;
+  const maxQty = Math.max(0, Math.min(6, available - currentInCart));
+  const qtySelect = document.getElementById("dialogQty");
+  qtySelect.innerHTML = Array.from({ length: maxQty }, (_, index) => `<option value="${index + 1}">${index + 1} 件</option>`).join("");
+  const addButton = document.getElementById("addToCart");
+  addButton.disabled = maxQty === 0;
+  addButton.textContent = maxQty === 0 ? "此款式已售罄" : "加入預購";
 }
 
 function addSelectedProduct() {
   if (state.settings.saleClosed) return updateSaleClosedState();
   const product = state.selectedProduct;
   if (!product) return;
-  const variant = document.getElementById("variantField").hidden ? "" : document.getElementById("dialogVariant").value;
+  const selectedValue = document.getElementById("variantField").hidden ? "" : document.getElementById("dialogVariant").value;
+  const variantOption = productVariantOptions(product).find((option) => option.id === selectedValue);
+  const variant = variantOption ? variantOption.name : selectedValue;
   const qty = Number(document.getElementById("dialogQty").value) || 1;
-  addProductToCart(product, variant, qty);
+  if (variantOption && Number(variantOption.stockQuantity) < qty) return showToast("此款式庫存不足，請重新選擇數量");
+  addProductToCart(product, variant, qty, variantOption);
   document.getElementById("productDialog").close();
 }
 
@@ -313,10 +350,12 @@ function quickAddProduct(id) {
   addProductToCart(product, "", 1);
 }
 
-function addProductToCart(product, variant, qty) {
+function addProductToCart(product, variant, qty, variantOption = null) {
   const existing = state.cart.find((item) => item.productId === product.id && item.variant === variant);
+  const available = variantOption ? Number(variantOption.stockQuantity) : product.stockQuantity;
+  if (available != null && (existing?.qty || 0) + qty > Number(available)) return showToast("庫存不足，請重新選擇數量");
   if (existing) existing.qty += qty;
-  else state.cart.push({ productId: product.id, variant, qty });
+  else state.cart.push({ productId: product.id, variant, variantId: variantOption?.id || "", variantImageUrl: variantOption?.imageUrl || "", qty });
   updateCart();
   showToast(`已加入 ${qty} 件商品`);
 }
@@ -375,7 +414,7 @@ function renderCheckout() {
   document.getElementById("checkoutItems").innerHTML = state.cart.map((item, index) => {
     const product = state.products.find((entry) => entry.id === item.productId);
     if (!product) return "";
-    const image = productImageUrls(product)[0] || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
+    const image = item.variantImageUrl || productImageUrls(product)[0] || `data:image/svg+xml,${encodeURIComponent(placeholderSvg())}`;
     return `<div class="checkout-item"><img src="${escapeAttr(image)}" alt="" /><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(item.variant || "單一款式")}・${item.qty} 件・NT$${formatNumber(Number(product.priceTwd || 0) * item.qty)}</small></div><button class="remove-item" type="button" data-remove="${index}">移除</button></div>`;
   }).join("");
   const totals = getTotals();
@@ -416,7 +455,7 @@ async function submitOrder(event) {
       pickupStoreCode: isSevenElevenFullMode() ? document.getElementById("pickupStoreCode").value.trim() : "",
       pickupStoreName: isSevenElevenFullMode() ? document.getElementById("pickupStoreName").value.trim() : "",
       note: document.getElementById("note").value.trim(),
-      items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, qty: item.qty })),
+      items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, variantId: item.variantId || "", qty: item.qty })),
     };
     payload.requestId = getOrCreateOrderRequestId(payload);
     const result = await apiPost(payload);

@@ -25,6 +25,7 @@ var PRODUCT_HEADERS_ = [
   "priceTwd",
   "stockQuantity",
   "imageUrlsJson",
+  "variantOptionsJson",
 ];
 
 var ORDER_HEADERS_ = [
@@ -866,7 +867,6 @@ function handleCreateStressTestPreorder_(data) {
       throw new Error("PRODUCT_CHANGED");
     if (!product.variants.length && variant)
       throw new Error("PRODUCT_CHANGED");
-
     var unitTwd = product.priceTwd;
     cleanItems.push({
       productId: product.id,
@@ -1270,12 +1270,11 @@ function handleCreatePreorder_(data) {
       try {
         reservation.updates.forEach(function (update) {
           appliedUpdates.push(update);
-          reservation.productSheet
-            .getRange(update.rowNumber, 8)
-            .setValue(update.newStatus);
-          reservation.productSheet
-            .getRange(update.rowNumber, 13)
-            .setValue(update.newStock);
+          applyInventoryReservationUpdate_(
+            reservation.productSheet,
+            update,
+            false,
+          );
         });
         inventoryChanged = appliedUpdates.length > 0;
         sheet.appendRow(orderRowValues);
@@ -1292,12 +1291,11 @@ function handleCreatePreorder_(data) {
         try {
           if (appendedOrderRow) sheet.deleteRow(appendedOrderRow);
           appliedUpdates.forEach(function (update) {
-            reservation.productSheet
-              .getRange(update.rowNumber, 8)
-              .setValue(update.oldStatus);
-            reservation.productSheet
-              .getRange(update.rowNumber, 13)
-              .setValue(update.oldStock);
+            applyInventoryReservationUpdate_(
+              reservation.productSheet,
+              update,
+              true,
+            );
           });
           inventoryChanged = false;
         } catch (rollbackError) {
@@ -1395,6 +1393,7 @@ function orderRequestPayloadDigest_(data) {
     return {
       productId: String((item && item.productId) || "").trim(),
       variant: String((item && item.variant) || "").trim(),
+      variantId: normalizeVariantId_(item && item.variantId),
       qty: Number(item && item.qty),
     };
   });
@@ -1444,14 +1443,31 @@ function prepareOrderItems_(sourceItems, catalog) {
     )
       throw new Error("PRODUCT_CHANGED");
     var variant = String(sourceItem.variant || "").trim();
-    if (product.variants.length && product.variants.indexOf(variant) === -1)
+    var variantOption = product.variantInventoryEnabled
+      ? findVariantOption_(product, variant, sourceItem.variantId)
+      : null;
+    if (product.variantInventoryEnabled && !variantOption)
+      throw new Error("PRODUCT_CHANGED");
+    if (
+      product.variantInventoryEnabled &&
+      variantOption.stockQuantity < qty
+    )
+      throw new Error("OUT_OF_STOCK");
+    if (
+      !product.variantInventoryEnabled &&
+      product.variants.length &&
+      product.variants.indexOf(variant) === -1
+    )
       throw new Error("PRODUCT_CHANGED");
     if (!product.variants.length && variant)
       throw new Error("PRODUCT_CHANGED");
+    if (variantOption) variant = variantOption.name;
     cleanItems.push({
       productId: product.id,
       name: product.name,
       variant: variant,
+      variantId: variantOption ? variantOption.id : "",
+      variantImageUrl: variantOption ? variantOption.imageUrl : "",
       qty: qty,
       unitPriceTwd: product.priceTwd,
       subtotalTwd: product.priceTwd * qty,
@@ -1489,16 +1505,59 @@ function prepareInventoryReservation_(sourceItems, settings) {
   var prepared = prepareOrderItems_(sourceItems, catalog);
   var requestedByProduct = {};
   prepared.cleanItems.forEach(function (item) {
-    requestedByProduct[item.productId] =
-      (requestedByProduct[item.productId] || 0) + item.qty;
+    if (!requestedByProduct[item.productId])
+      requestedByProduct[item.productId] = { total: 0, variants: {} };
+    requestedByProduct[item.productId].total += item.qty;
+    if (item.variantId)
+      requestedByProduct[item.productId].variants[item.variantId] =
+        (requestedByProduct[item.productId].variants[item.variantId] || 0) +
+        item.qty;
   });
   var updates = [];
   Object.keys(requestedByProduct).forEach(function (productId) {
     var source = rowByProductId[productId];
     if (!source) throw new Error("PRODUCT_CHANGED");
     var product = source.product;
+    var request = requestedByProduct[productId];
+    if (product.variantInventoryEnabled) {
+      var nextOptions = product.variantOptions.map(function (option) {
+        return {
+          id: option.id,
+          name: option.name,
+          stockQuantity: option.stockQuantity,
+          imageUrl: option.imageUrl,
+        };
+      });
+      Object.keys(request.variants).forEach(function (variantId) {
+        var option = findVariantOption_(
+          { variantOptions: nextOptions },
+          "",
+          variantId,
+        );
+        var requestedVariantQty = request.variants[variantId];
+        if (!option) throw new Error("PRODUCT_CHANGED");
+        if (option.stockQuantity < requestedVariantQty)
+          throw new Error("OUT_OF_STOCK");
+        option.stockQuantity -= requestedVariantQty;
+      });
+      var nextTotal = nextOptions.reduce(function (total, option) {
+        return total + option.stockQuantity;
+      }, 0);
+      updates.push({
+        rowNumber: source.rowNumber,
+        oldStatus: String(source.row[7] || ""),
+        oldStock: source.row[12],
+        oldVariantOptionsJson: source.row[14],
+        newStatus:
+          nextTotal === 0 ? "下架" : String(source.row[7] || "上架"),
+        newStock: nextTotal,
+        newVariantOptionsJson: JSON.stringify(nextOptions),
+        variantOptionsChanged: true,
+      });
+      return;
+    }
     if (product.stockQuantity === null) return;
-    var requestedQty = requestedByProduct[productId];
+    var requestedQty = request.total;
     if (product.stockQuantity < requestedQty) throw new Error("OUT_OF_STOCK");
     var newStock = product.stockQuantity - requestedQty;
     updates.push({
@@ -1512,6 +1571,23 @@ function prepareInventoryReservation_(sourceItems, settings) {
   prepared.productSheet = productSheet;
   prepared.updates = updates;
   return prepared;
+}
+
+function applyInventoryReservationUpdate_(productSheet, update, rollback) {
+  productSheet
+    .getRange(update.rowNumber, 8)
+    .setValue(rollback ? update.oldStatus : update.newStatus);
+  productSheet
+    .getRange(update.rowNumber, 13)
+    .setValue(rollback ? update.oldStock : update.newStock);
+  if (update.variantOptionsChanged)
+    productSheet
+      .getRange(update.rowNumber, 15)
+      .setValue(
+        rollback
+          ? update.oldVariantOptionsJson
+          : update.newVariantOptionsJson,
+      );
 }
 
 function readSaleClosedFlag_() {
@@ -3539,10 +3615,23 @@ function handleAdminAdjustOrder_(data) {
         unitPrice = number_(product.priceTwd);
         name = product.name;
       }
+      var selectedVariantOption = product && product.variantInventoryEnabled
+        ? findVariantOption_(
+            product,
+            requested.variant,
+            existing && existing.variantId,
+          )
+        : null;
       var item = {
         productId: requested.productId,
         name: name,
         variant: requested.variant,
+        variantId: selectedVariantOption
+          ? selectedVariantOption.id
+          : String((existing && existing.variantId) || ""),
+        variantImageUrl: selectedVariantOption
+          ? selectedVariantOption.imageUrl
+          : String((existing && existing.variantImageUrl) || ""),
         qty: requested.qty,
         unitPriceTwd: unitPrice,
         subtotalTwd: unitPrice * requested.qty,
@@ -3805,6 +3894,8 @@ function handleAdminAdjustOrderShortage_(data) {
           productId: String(item.productId || ""),
           name: String(item.name || ""),
           variant: String(item.variant || ""),
+          variantId: String(item.variantId || ""),
+          variantImageUrl: String(item.variantImageUrl || ""),
           qty: cancelQty,
           unitPriceTwd: unitPrice,
           subtotalTwd: unitPrice * cancelQty,
@@ -3817,6 +3908,8 @@ function handleAdminAdjustOrderShortage_(data) {
           productId: String(item.productId || ""),
           name: String(item.name || ""),
           variant: String(item.variant || ""),
+          variantId: String(item.variantId || ""),
+          variantImageUrl: String(item.variantImageUrl || ""),
           qty: remainingQty,
           unitPriceTwd: unitPrice,
           subtotalTwd: unitPrice * remainingQty,
@@ -4287,7 +4380,22 @@ function prepareInventoryRestock_(itemsJson) {
     var qty = Number(item && item.qty);
     if (!productId || !Number.isInteger(qty) || qty < 1)
       throw new Error("INVALID_ORDER_ITEMS");
-    quantities[productId] = (quantities[productId] || 0) + qty;
+    if (!quantities[productId])
+      quantities[productId] = { total: 0, variants: {} };
+    quantities[productId].total += qty;
+    var variantId = normalizeVariantId_(item && item.variantId);
+    var variantName = String((item && item.variant) || "").trim();
+    var variantKey = variantId || (variantName ? "name:" + variantName : "");
+    if (variantKey) {
+      if (!quantities[productId].variants[variantKey])
+        quantities[productId].variants[variantKey] = {
+          qty: 0,
+          id: variantId,
+          name: variantName,
+          imageUrl: String((item && item.variantImageUrl) || "").trim(),
+        };
+      quantities[productId].variants[variantKey].qty += qty;
+    }
   });
   var productIds = Object.keys(quantities);
   if (!productIds.length) throw new Error("INVALID_ORDER_ITEMS");
@@ -4307,6 +4415,50 @@ function prepareInventoryRestock_(itemsJson) {
     var source = productRows[productId];
     if (!source) throw new Error("PRODUCT_CHANGED");
     var oldStock = source.row[12];
+    var variantOptions = parseVariantOptions_(source.row[14]);
+    if (variantOptions.length) {
+      var restoredVariantQty = 0;
+      Object.keys(quantities[productId].variants).forEach(function (variantKey) {
+        var restore = quantities[productId].variants[variantKey];
+        var option = findVariantOption_(
+          { variantOptions: variantOptions },
+          restore.name,
+          restore.id,
+        );
+        if (!option) {
+          option = {
+            id: restore.id || createVariantId_(),
+            name: restore.name || "已移除款式",
+            stockQuantity: 0,
+            imageUrl: restore.imageUrl,
+          };
+          variantOptions.push(option);
+        }
+        option.stockQuantity += restore.qty;
+        restoredVariantQty += restore.qty;
+      });
+      if (restoredVariantQty !== quantities[productId].total)
+        throw new Error("PRODUCT_CHANGED");
+      var nextTotal = variantOptions.reduce(function (total, option) {
+        return total + option.stockQuantity;
+      }, 0);
+      var variantOldStatus = String(source.row[7] || "");
+      updates.push({
+        rowNumber: source.rowNumber,
+        oldStatus: variantOldStatus,
+        oldStock: oldStock,
+        oldVariantOptionsJson: source.row[14],
+        newStatus:
+          number_(oldStock) === 0 && variantOldStatus === "下架"
+            ? "上架"
+            : variantOldStatus || "上架",
+        newStock: nextTotal,
+        newVariantOptionsJson: JSON.stringify(variantOptions),
+        variantOptionsChanged: true,
+        restoredQty: restoredVariantQty,
+      });
+      return;
+    }
     if (oldStock === "" || oldStock == null) return;
     var stock = Number(oldStock);
     if (!Number.isInteger(stock) || stock < 0)
@@ -4318,8 +4470,8 @@ function prepareInventoryRestock_(itemsJson) {
       oldStock: oldStock,
       newStatus:
         stock === 0 && oldStatus === "下架" ? "上架" : oldStatus || "上架",
-      newStock: stock + quantities[productId],
-      restoredQty: quantities[productId],
+      newStock: stock + quantities[productId].total,
+      restoredQty: quantities[productId].total,
     });
   });
   return { productSheet: productSheet, updates: updates };
@@ -4333,6 +4485,14 @@ function applyInventoryRestock_(plan, rollback) {
     plan.productSheet
       .getRange(update.rowNumber, 13)
       .setValue(rollback ? update.oldStock : update.newStock);
+    if (update.variantOptionsChanged)
+      plan.productSheet
+        .getRange(update.rowNumber, 15)
+        .setValue(
+          rollback
+            ? update.oldVariantOptionsJson
+            : update.newVariantOptionsJson,
+        );
   });
 }
 
@@ -4773,6 +4933,7 @@ function handleAdminSaveProduct_(data) {
       product.priceTwd,
       product.stockQuantity,
       JSON.stringify(product.imageUrls),
+      JSON.stringify(product.variantOptions),
     ];
     if (rowNumber)
       sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).setValues([row]);
@@ -4878,6 +5039,10 @@ function handleAdminUpdateProductStock_(data) {
     var currentStatus = String(
       sheet.getRange(rowNumber, 8).getDisplayValue() || "",
     ).trim();
+    var variantOptions = parseVariantOptions_(
+      sheet.getRange(rowNumber, 15).getValue(),
+    );
+    if (variantOptions.length) throw new Error("VARIANT_STOCK_REQUIRED");
     sheet.getRange(rowNumber, 13).setValue(stockQuantity);
     if (stockQuantity === 0 && currentStatus !== "已封存")
       sheet.getRange(rowNumber, 8).setValue("下架");
@@ -5157,6 +5322,48 @@ function validateProduct_(source) {
     })
     .filter(Boolean);
   if (variants.length > 30) throw new Error("INVALID_PRODUCT");
+  var variantOptions = [];
+  if (source.variantInventoryEnabled === true) {
+    if (!Array.isArray(source.variantOptions) || !source.variantOptions.length)
+      throw new Error("INVALID_PRODUCT");
+    var variantNames = {};
+    var variantIds = {};
+    source.variantOptions.forEach(function (sourceOption) {
+      sourceOption = sourceOption || {};
+      var name = cleanText_(sourceOption.name, 50);
+      var stockQuantity = Number(sourceOption.stockQuantity);
+      var imageUrl = cleanText_(sourceOption.imageUrl, 500);
+      var variantId = normalizeVariantId_(sourceOption.id) || createVariantId_();
+      var normalizedName = name.toLocaleLowerCase();
+      if (
+        !name ||
+        variantNames[normalizedName] ||
+        variantIds[variantId] ||
+        !Number.isInteger(stockQuantity) ||
+        stockQuantity < 0 ||
+        stockQuantity > 999999 ||
+        (imageUrl && !/^https:\/\//i.test(imageUrl))
+      )
+        throw new Error("INVALID_PRODUCT");
+      variantNames[normalizedName] = true;
+      variantIds[variantId] = true;
+      variantOptions.push({
+        id: variantId,
+        name: name,
+        stockQuantity: stockQuantity,
+        imageUrl: imageUrl,
+      });
+    });
+    if (variantOptions.length > 30) throw new Error("INVALID_PRODUCT");
+    variants = variantOptions.map(function (option) {
+      return option.name;
+    });
+  }
+  var totalStock = variantOptions.length
+    ? variantOptions.reduce(function (total, option) {
+        return total + option.stockQuantity;
+      }, 0)
+    : Number(source.stockQuantity);
   var product = {
     id: String(source.id || "").trim(),
     name: cleanText_(source.name, 100),
@@ -5166,10 +5373,12 @@ function validateProduct_(source) {
     krwPrice: Number(source.krwPrice || 0),
     priceTwd: Number(source.priceTwd),
     variants: variants,
+    variantOptions: variantOptions,
+    variantInventoryEnabled: variantOptions.length > 0,
     description: cleanText_(source.description, 500),
     active: source.active === true,
     sortOrder: Number(source.sortOrder || 0),
-    stockQuantity: Number(source.stockQuantity),
+    stockQuantity: totalStock,
   };
   if (!product.name || !product.category || !product.imageUrl)
     throw new Error("INVALID_PRODUCT");
@@ -5199,6 +5408,72 @@ function validateProduct_(source) {
   )
     throw new Error("INVALID_PRODUCT");
   return product;
+}
+
+function normalizeVariantId_(value) {
+  var id = String(value || "").trim();
+  return /^v-[A-Za-z0-9_-]{6,80}$/.test(id) ? id : "";
+}
+
+function createVariantId_() {
+  return (
+    "v-" +
+    new Date().getTime().toString(36) +
+    "-" +
+    Math.random().toString(36).slice(2, 10)
+  );
+}
+
+function parseVariantOptions_(value) {
+  var source = value;
+  if (typeof source === "string") {
+    try {
+      source = JSON.parse(source || "[]");
+    } catch (error) {
+      source = [];
+    }
+  }
+  if (!Array.isArray(source)) return [];
+  var names = {};
+  return source
+    .map(function (sourceOption) {
+      sourceOption = sourceOption || {};
+      var name = String(sourceOption.name || "").trim().slice(0, 50);
+      var stockQuantity = Number(sourceOption.stockQuantity);
+      var imageUrl = String(sourceOption.imageUrl || "").trim().slice(0, 500);
+      var normalizedName = name.toLocaleLowerCase();
+      if (
+        !name ||
+        names[normalizedName] ||
+        !Number.isInteger(stockQuantity) ||
+        stockQuantity < 0 ||
+        (imageUrl && !/^https:\/\//i.test(imageUrl))
+      )
+        return null;
+      names[normalizedName] = true;
+      return {
+        id: normalizeVariantId_(sourceOption.id) || createVariantId_(),
+        name: name,
+        stockQuantity: stockQuantity,
+        imageUrl: imageUrl,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 30);
+}
+
+function findVariantOption_(product, variant, variantId) {
+  var options = (product && product.variantOptions) || [];
+  var normalizedId = normalizeVariantId_(variantId);
+  var name = String(variant || "").trim();
+  for (var index = 0; index < options.length; index++) {
+    if (
+      (normalizedId && options[index].id === normalizedId) ||
+      (!normalizedId && options[index].name === name)
+    )
+      return options[index];
+  }
+  return null;
 }
 
 function readProducts_(settings) {
@@ -5250,6 +5525,11 @@ function rowToProduct_(row, legacyExchangeRate) {
     imageUrls.unshift(legacyImageUrl);
   imageUrls = imageUrls.slice(0, 10);
   var stockQuantity = row[12] === "" || row[12] == null ? null : number_(row[12]);
+  var variantOptions = parseVariantOptions_(row[14]);
+  if (variantOptions.length)
+    stockQuantity = variantOptions.reduce(function (total, option) {
+      return total + option.stockQuantity;
+    }, 0);
   var productStatus = String(row[7] || "").trim();
   var isArchived = productStatus === "已封存";
   var isActive = productStatus === "上架";
@@ -5262,12 +5542,18 @@ function rowToProduct_(row, legacyExchangeRate) {
     imageUrls: imageUrls,
     krwPrice: number_(row[4]),
     priceTwd: priceTwd,
-    variants: String(row[5] || "")
-      .split(/\n/)
-      .map(function (value) {
-        return value.trim();
-      })
-      .filter(Boolean),
+    variants: variantOptions.length
+      ? variantOptions.map(function (option) {
+          return option.name;
+        })
+      : String(row[5] || "")
+          .split(/\n/)
+          .map(function (value) {
+            return value.trim();
+          })
+          .filter(Boolean),
+    variantOptions: variantOptions,
+    variantInventoryEnabled: variantOptions.length > 0,
     description: String(row[6] || "").trim(),
     active: isActive,
     archived: isArchived,
