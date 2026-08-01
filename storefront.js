@@ -1,5 +1,5 @@
 const CONFIG = window.QUOKKA_CONFIG || {};
-window.QUOKKA_APP_VERSION = "20260729-orders-first";
+window.QUOKKA_APP_VERSION = "20260801-submit-status";
 const state = {
   products: [],
   settings: { preorderNotice: "", depositPercent: 50, saleClosed: false, saleClosedNotice: "本次連線已結束，謝謝大家的支持！" },
@@ -15,6 +15,7 @@ const state = {
 };
 
 const PENDING_ORDER_REQUEST_KEY = "quokka-pending-order-request-v1";
+let orderSubmissionInProgress = false;
 
 const demoProducts = [
   { id: "demo-1", name: "矮袋鼠造型鑰匙圈", category: "吊飾", imageUrl: "", priceTwd: 330, variants: ["QUOKKA", "BOBO"], description: "韓國現場預購示意商品", active: true, sortOrder: 1 },
@@ -344,9 +345,20 @@ async function submitOrder(event) {
   if (state.settings.saleClosed) return updateSaleClosedState();
   if (!CONFIG.apiUrl) return showToast("尚未設定 GAS API，現在是版面預覽模式");
   if (!state.line.idToken) return showToast("請從 LINE 開啟此頁並完成登入");
+  if (orderSubmissionInProgress) return;
   const button = document.getElementById("submitOrder");
+  const status = document.getElementById("orderSubmitStatus");
+  orderSubmissionInProgress = true;
   button.disabled = true;
-  button.textContent = "正在送出預購…";
+  button.textContent = "訂單確認中…";
+  status.hidden = false;
+  status.classList.remove("is-busy");
+  status.textContent = "訂單正在確認中，請稍候。請勿關閉頁面或重複送出。";
+  const busyNoticeTimer = setTimeout(() => {
+    button.textContent = "仍在確認訂單…";
+    status.classList.add("is-busy");
+    status.textContent = "目前下單人數較多，系統仍在確認庫存。請繼續停留此頁面，完成後會自動顯示結果。";
+  }, 15000);
   try {
     const payload = {
       action: "createPreorder",
@@ -396,8 +408,13 @@ async function submitOrder(event) {
       showToast(messages[error.message] || `送出失敗（${error.message || "網路連線異常"}）`);
     }
   } finally {
+    clearTimeout(busyNoticeTimer);
+    orderSubmissionInProgress = false;
     button.disabled = false;
     button.textContent = "先送出預購訂單";
+    status.hidden = true;
+    status.classList.remove("is-busy");
+    status.textContent = "";
   }
 }
 

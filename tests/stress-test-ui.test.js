@@ -14,6 +14,8 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync("stress-test.js", "utf8"), context);
 const html = fs.readFileSync("stress-test.html", "utf8");
 const storefront = fs.readFileSync("storefront.js", "utf8");
+const storefrontHtml = fs.readFileSync("index.html", "utf8");
+const storefrontCss = fs.readFileSync("style.css", "utf8");
 
 let passed = 0;
 function test(name, fn) {
@@ -146,6 +148,17 @@ test("正式前端會保存 requestId 並在相同 payload 重送時沿用", () 
   assert.match(storefront, /clearPendingOrderRequest\(\)/);
   assert.match(storefront, /OUT_OF_STOCK/);
   assert.match(storefront, /LOCK_TIMEOUT/);
+});
+
+test("正式送單會持續顯示處理狀態，超過 15 秒改為忙碌提醒", () => {
+  assert.match(storefrontHtml, /id="orderSubmitStatus"/);
+  assert.match(storefrontHtml, /aria-live="polite"/);
+  assert.match(storefront, /訂單正在確認中，請稍候/);
+  assert.match(storefront, /目前下單人數較多，系統仍在確認庫存/);
+  assert.match(storefront, /15000/);
+  assert.match(storefront, /clearTimeout\(busyNoticeTimer\)/);
+  assert.match(storefront, /orderSubmissionInProgress/);
+  assert.match(storefrontCss, /\.order-submit-status/);
 });
 
 console.log(`\n${passed} 個壓力測試前端案例全部通過`);

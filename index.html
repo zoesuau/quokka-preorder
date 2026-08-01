@@ -8,10 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260801-product-gallery" />
+    <link rel="stylesheet" href="style.css?v=20260801-submit-status" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="storefront.js?v=20260801-order-idempotency" defer></script>
+    <script src="storefront.js?v=20260801-submit-status" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -120,6 +120,7 @@
           <span id="preorderAgreementText">我了解這是預購商品；下單先付商品總額的 50% 訂金。採購成功後取消訂單，訂金不予退還；若韓國現場缺貨，該商品訂金將退回。</span>
         </label>
         <button class="primary-button submit-button" id="submitOrder" type="submit">先送出預購訂單</button>
+        <p class="order-submit-status" id="orderSubmitStatus" role="status" aria-live="polite" hidden></p>
       </form>
     </dialog>
 
