@@ -68,6 +68,68 @@ var ORDER_HEADERS_ = [
   "iopenMallPaymentDeadlineAt",
 ];
 
+var ORDER_REQUEST_SHEET_NAME_ = "OrderRequestIds";
+var ORDER_REQUEST_HEADERS_ = [
+  "requestId",
+  "orderNo",
+  "lineUserId",
+  "payloadDigest",
+  "createdAt",
+  "status",
+];
+
+var STRESS_TEST_SHEET_NAME_ = "壓力測試訂單";
+var STRESS_TEST_MAX_REQUESTS_ = 20;
+var STRESS_TEST_HEADERS_ = [
+  "testOrderId",
+  "testRequestId",
+  "createdAt",
+  "testMode",
+  "lineDisplayName",
+  "customerName",
+  "phone",
+  "note",
+  "itemsJson",
+  "itemsSummary",
+  "totalQty",
+  "estimatedTotal",
+  "depositTotal",
+  "estimatedBalance",
+  "payloadJson",
+  "notificationsSent",
+  "inventoryMutated",
+  "formalOrderCreated",
+];
+var FORMAL_SIMULATION_SHEET_NAME_ = "正式流程模擬訂單";
+var FORMAL_SIMULATION_HEADERS_ = [
+  "simulationOrderId",
+  "formalOrderNoCandidate",
+  "testRequestId",
+  "simulationRunId",
+  "createdAt",
+  "testMode",
+  "lineDisplayName",
+  "customerName",
+  "phone",
+  "productId",
+  "itemsJson",
+  "itemsSummary",
+  "totalQty",
+  "estimatedTotal",
+  "depositTotal",
+  "estimatedBalance",
+  "depositPercent",
+  "productStockSnapshot",
+  "simulatedStockLimit",
+  "cumulativeRequestedQty",
+  "oversellRisk",
+  "notificationSent",
+  "inventoryMutated",
+  "formalOrderCreated",
+  "formalIdempotencyImplemented",
+  "payloadJson",
+];
+
 var ORDER_STATUS_PENDING_ = "待收訂金";
 var ORDER_STATUS_PAYMENT_REPORTED_ = "待確認訂金";
 var ORDER_STATUS_DEPOSIT_RECEIVED_ = "已收到訂金";
@@ -124,10 +186,27 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  var data;
   try {
-    var data = JSON.parse(e && e.postData ? e.postData.contents : "{}");
+    data = JSON.parse(e && e.postData ? e.postData.contents : "{}");
     var action = String(data.action || "").trim();
 
+    if (action === "stressTestHandshake")
+      return handleStressTestHandshake_(data);
+    if (action === "verifyStressTestResults")
+      return handleVerifyStressTestResults_(data);
+    if (action === "formalSimulationHandshake")
+      return handleFormalSimulationHandshake_(data);
+    if (action === "verifyFormalSimulationResults")
+      return handleVerifyFormalSimulationResults_(data);
+    if (
+      action === "createPreorder" &&
+      data.testMode === true &&
+      data.formalSimulationMode === true
+    )
+      return handleCreateFormalSimulationPreorder_(data);
+    if (action === "createPreorder" && data.testMode === true)
+      return handleCreateStressTestPreorder_(data);
     if (action === "createPreorder") return handleCreatePreorder_(data);
     if (action === "recordLineWebhookSignals")
       return handleRecordLineWebhookSignals_(data);
@@ -159,6 +238,15 @@ function doPost(e) {
     return json_({ ok: false, error: "UNSUPPORTED_ACTION" });
   } catch (error) {
     console.error(error);
+    if (data && data.testMode === true) {
+      return json_({
+        ok: false,
+        success: false,
+        testMode: true,
+        testRequestId: cleanText_(data.testRequestId, 80),
+        error: safeError_(error),
+      });
+    }
     return json_({ ok: false, error: safeError_(error) });
   }
 }
@@ -203,6 +291,7 @@ function setupQuokkaPreorder() {
   var ss = spreadsheet_();
   ensureSheet_(ss, "Products", PRODUCT_HEADERS_);
   ensureSheet_(ss, "Preorders", ORDER_HEADERS_);
+  ensureSheet_(ss, ORDER_REQUEST_SHEET_NAME_, ORDER_REQUEST_HEADERS_);
   ensureSheet_(ss, "LineInboundEvents", LINE_EVENT_HEADERS_);
   ensureSettingsSheet_(ss);
   return "設定完成";
@@ -278,154 +367,1107 @@ function invalidatePublicCatalogCache_() {
   }
 }
 
-function handleCreatePreorder_(data) {
-  var profile = verifyLineIdToken_(data.idToken);
+function handleStressTestHandshake_(data) {
+  requireStressTestEnabled_(data);
+  return json_({
+    ok: true,
+    success: true,
+    testMode: true,
+    stressTestSupported: true,
+    maxRequests: STRESS_TEST_MAX_REQUESTS_,
+    isolatedSheet: STRESS_TEST_SHEET_NAME_,
+    safeguards: {
+      customerLineNotifications: false,
+      adminLineNotifications: false,
+      inventoryMutation: false,
+      formalOrderCreation: false,
+      formalOrderNumberCreation: false,
+      scheduledWorkflowEnrollment: false,
+    },
+    safetySnapshot: createStressSafetySnapshot_(),
+    message: "壓力測試模式已啟用，正式訂單、通知與庫存皆已隔離",
+  });
+}
+
+function handleFormalSimulationHandshake_(data) {
+  requireStressTestEnabled_(data);
+  return json_({
+    ok: true,
+    success: true,
+    testMode: true,
+    formalSimulationMode: true,
+    formalSimulationSupported: true,
+    maxRequests: STRESS_TEST_MAX_REQUESTS_,
+    isolatedSheet: FORMAL_SIMULATION_SHEET_NAME_,
+    safeguards: {
+      customerLineNotifications: false,
+      adminLineNotifications: false,
+      inventoryMutation: false,
+      formalOrderCreation: false,
+      scheduledWorkflowEnrollment: false,
+    },
+    formalFlowCoverage: {
+      scriptLockWaitMs: 30000,
+      setup: true,
+      settingsAndSaleState: true,
+      serverProductAndPriceValidation: true,
+      depositCalculation: true,
+      formalOrderNumberGenerator: "createOrderNo_",
+      lineTokenVerification: false,
+      linePush: false,
+      formalPreordersWrite: false,
+    },
+    observedFormalRisks: {
+      inventoryDeductionImplemented: true,
+      requestIdempotencyImplemented: true,
+    },
+    safetySnapshot: createStressSafetySnapshot_(),
+    message: "正式流程模擬已啟用；只寫入隔離模擬表，不通知、不改庫存、不建正式訂單",
+  });
+}
+
+function handleCreateFormalSimulationPreorder_(data) {
+  requireStressTestEnabled_(data);
+  validateStressTestFields_(data);
+  validateFormalSimulationFields_(data);
+  setupQuokkaPreorder();
+  var settings = readSettings_();
+  if (settings.saleClosed) throw new Error("SALE_CLOSED");
+  validatePreorderFields_(data);
+  var prepared = prepareOrderItems_(data.items, readProducts_(settings));
+  var cleanItems = prepared.cleanItems;
+  var totalQty = prepared.totalQty;
+  var estimatedTotal = prepared.estimatedTotal;
+  var depositTotal = Math.ceil(
+    estimatedTotal * (settings.depositPercent / 100),
+  );
+  var estimatedBalance = estimatedTotal - depositTotal;
+  var itemsSummary = summarizeOrderItems_(cleanItems);
+  var product = cleanItems[0];
   var lock = LockService.getScriptLock();
-  var orderResult;
-  lock.waitLock(20000);
+  var lockAcquired = false;
   try {
-    setupQuokkaPreorder();
-    var settings = readSettings_();
-    if (settings.saleClosed) throw new Error("SALE_CLOSED");
-    validatePreorderFields_(data);
-    var catalog = readProducts_();
-    var productMap = {};
-    catalog.forEach(function (product) {
-      productMap[product.id] = product;
-    });
-
-    var cleanItems = [];
-    var totalQty = 0;
-    var estimatedTotal = 0;
-    data.items.forEach(function (sourceItem) {
-      var productId = String((sourceItem && sourceItem.productId) || "").trim();
-      var product = productMap[productId];
-      var qty = Number(sourceItem && sourceItem.qty);
-      if (
-        !product ||
-        !product.active ||
-        !Number.isInteger(qty) ||
-        qty < 1 ||
-        qty > 20
-      ) {
-        throw new Error("PRODUCT_CHANGED");
-      }
-      var variant = String(sourceItem.variant || "").trim();
-      if (product.variants.length && product.variants.indexOf(variant) === -1) {
-        throw new Error("PRODUCT_CHANGED");
-      }
-      var unitTwd = product.priceTwd;
-      cleanItems.push({
-        productId: product.id,
-        name: product.name,
-        variant: variant,
-        qty: qty,
-        unitPriceTwd: unitTwd,
-        subtotalTwd: unitTwd * qty,
-      });
-      totalQty += qty;
-      estimatedTotal += unitTwd * qty;
-    });
-
-    if (!cleanItems.length || totalQty > 100) throw new Error("INVALID_ITEMS");
-    var depositTotal = Math.ceil(
-      estimatedTotal * (settings.depositPercent / 100),
+    lock.waitLock(30000);
+    lockAcquired = true;
+  } catch (error) {
+    throw new Error("LOCK_TIMEOUT");
+  }
+  try {
+    var ss = spreadsheet_();
+    var sheet = ensureSheet_(
+      ss,
+      FORMAL_SIMULATION_SHEET_NAME_,
+      FORMAL_SIMULATION_HEADERS_,
     );
-    var estimatedBalance = estimatedTotal - depositTotal;
+    var existingRow = findFormalSimulationRequestRow_(
+      sheet,
+      data.testRequestId,
+    );
+    if (existingRow) {
+      return json_({
+        ok: true,
+        success: true,
+        duplicate: true,
+        testMode: true,
+        formalSimulationMode: true,
+        testRequestId: data.testRequestId,
+        simulationOrderId: sheet
+          .getRange(existingRow, 1)
+          .getDisplayValue(),
+        formalOrderNoCandidate: sheet
+          .getRange(existingRow, 2)
+          .getDisplayValue(),
+        message: "此模擬請求已處理，未重複建立模擬資料",
+      });
+    }
+
+    var cumulativeRequestedQty =
+      sumFormalSimulationRunQty_(
+        sheet,
+        data.simulationRunId,
+        product.productId,
+      ) + totalQty;
+    var simulatedStockLimit = Number(data.simulatedStockLimit);
+    if (cumulativeRequestedQty > simulatedStockLimit)
+      return json_({
+        ok: false,
+        success: false,
+        testMode: true,
+        formalSimulationMode: true,
+        testRequestId: data.testRequestId,
+        error: "OUT_OF_STOCK",
+        simulatedStockLimit: simulatedStockLimit,
+        cumulativeRequestedQty: cumulativeRequestedQty,
+        message: "模擬庫存不足，未建立模擬訂單",
+      });
     var now = new Date();
-    var orderNo = createOrderNo_(now);
-    var itemsSummary = cleanItems
-      .map(function (item) {
-        return (
-          item.name +
-          (item.variant ? "｜" + item.variant : "") +
-          " × " +
-          item.qty
-        );
-      })
-      .join("\n");
-    var sheet = spreadsheet_().getSheetByName("Preorders");
+    var formalOrderNoCandidate = createOrderNo_(now);
+    var simulationOrderId = "SIM-" + formalOrderNoCandidate;
+    var productStockSnapshot = simulatedStockLimit;
+    var safePayload = {
+      action: "createPreorder",
+      idToken: "TEST_MODE_NO_LINE_TOKEN",
+      lineDisplayName: cleanText_(data.lineDisplayName, 80),
+      customerName: cleanText_(data.customerName, 30),
+      phone: cleanText_(data.phone, 20),
+      note: cleanText_(data.note, 300),
+      items: data.items,
+      testMode: true,
+      formalSimulationMode: true,
+      testRequestId: data.testRequestId,
+      simulationRunId: data.simulationRunId,
+      simulatedStockLimit: simulatedStockLimit,
+    };
+
     sheet.appendRow([
-      orderNo,
+      simulationOrderId,
+      formalOrderNoCandidate,
+      data.testRequestId,
+      data.simulationRunId,
       formatDateTime_(now),
-      profile.sub,
-      String(data.lineDisplayName || profile.name || "")
-        .trim()
-        .slice(0, 80),
-      cleanText_(data.customerName, 30),
-      cleanText_(data.phone, 20),
+      true,
+      safePayload.lineDisplayName,
+      safePayload.customerName,
+      safePayload.phone,
+      product.productId,
       JSON.stringify(cleanItems),
       itemsSummary,
       totalQty,
       estimatedTotal,
       depositTotal,
       estimatedBalance,
-      "",
-      "",
-      cleanText_(data.note, 300),
-      ORDER_STATUS_PENDING_,
-      "",
-      "未開設賣場",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
       settings.depositPercent,
-      formatDateTime_(
-        new Date(now.getTime() + settings.paymentReminderHours * 3600000),
-      ),
-      formatDateTime_(
-        new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
-      ),
-      formatDateTime_(
-        new Date(
-          now.getTime() +
-            (settings.paymentDeadlineHours + settings.paymentGraceHours) *
-              3600000,
-        ),
-      ),
-      "",
-      "",
+      productStockSnapshot,
+      simulatedStockLimit,
+      cumulativeRequestedQty,
+      false,
+      false,
+      false,
+      false,
+      true,
+      JSON.stringify(safePayload),
     ]);
-    orderResult = {
-      orderNo: orderNo,
-      createdAt: formatDateTime_(now),
-      customerName: cleanText_(data.customerName, 30),
-      items: cleanItems,
-      itemsSummary: itemsSummary,
-      totalQty: totalQty,
+
+    return json_({
+      ok: true,
+      success: true,
+      duplicate: false,
+      testMode: true,
+      formalSimulationMode: true,
+      testRequestId: data.testRequestId,
+      simulationOrderId: simulationOrderId,
+      formalOrderNoCandidate: formalOrderNoCandidate,
       estimatedTotal: estimatedTotal,
       depositTotal: depositTotal,
       estimatedBalance: estimatedBalance,
-      depositPercent: settings.depositPercent,
-      paymentDeadlineAt: formatDateTime_(
-        new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
-      ),
-    };
+      simulatedStockLimit: simulatedStockLimit,
+      cumulativeRequestedQty: cumulativeRequestedQty,
+      simulatedStockRemaining: simulatedStockLimit - cumulativeRequestedQty,
+      oversellRisk: false,
+      notificationSuppressed: true,
+      inventoryMutationSuppressed: true,
+      formalOrderCreationSuppressed: true,
+      message: "正式流程模擬資料寫入成功",
+    });
+  } finally {
+    if (lockAcquired) lock.releaseLock();
+  }
+}
+
+function handleVerifyFormalSimulationResults_(data) {
+  requireStressTestEnabled_(data);
+  var requestIds = Array.isArray(data.testRequestIds)
+    ? data.testRequestIds.map(function (value) {
+        return String(value || "").trim();
+      })
+    : [];
+  if (
+    !requestIds.length ||
+    requestIds.length > STRESS_TEST_MAX_REQUESTS_ ||
+    requestIds.some(function (value) {
+      return !isValidStressTestRequestId_(value);
+    })
+  )
+    throw new Error("INVALID_TEST_REQUEST_ID");
+
+  var requested = {};
+  requestIds.forEach(function (value) {
+    requested[value] = true;
+  });
+  var uniqueRequestIds = Object.keys(requested);
+  var sheet = spreadsheet_().getSheetByName(FORMAL_SIMULATION_SHEET_NAME_);
+  var rows =
+    sheet && sheet.getLastRow() > 1
+      ? sheet
+          .getRange(
+            2,
+            1,
+            sheet.getLastRow() - 1,
+            FORMAL_SIMULATION_HEADERS_.length,
+          )
+          .getDisplayValues()
+      : [];
+  var matchedRows = rows.filter(function (row) {
+    return requested[String(row[2] || "").trim()] === true;
+  });
+  var requestCounts = {};
+  var orderCounts = {};
+  matchedRows.forEach(function (row) {
+    var requestId = String(row[2] || "").trim();
+    var orderNo = String(row[1] || "").trim();
+    requestCounts[requestId] = (requestCounts[requestId] || 0) + 1;
+    orderCounts[orderNo] = (orderCounts[orderNo] || 0) + 1;
+  });
+  var missingRequestIds = uniqueRequestIds.filter(function (value) {
+    return !requestCounts[value];
+  });
+  var duplicateRequestIds = Object.keys(requestCounts).filter(function (value) {
+    return requestCounts[value] > 1;
+  });
+  var duplicateFormalOrderNoCandidates = Object.keys(orderCounts).filter(
+    function (value) {
+      return value && orderCounts[value] > 1;
+    },
+  );
+  var incompleteRequestIds = matchedRows
+    .filter(function (row) {
+      return (
+        String(row[0] || "").indexOf("SIM-QK") !== 0 ||
+        String(row[1] || "").indexOf("QK") !== 0 ||
+        String(row[5] || "").toUpperCase() !== "TRUE" ||
+        row.slice(0, 21).some(function (value) {
+          return String(
+            value === undefined || value === null ? "" : value,
+          ).trim() === "";
+        })
+      );
+    })
+    .map(function (row) {
+      return String(row[2] || "").trim();
+    });
+  var oversellRiskCount = matchedRows.filter(function (row) {
+    return String(row[20] || "").toUpperCase() === "TRUE";
+  }).length;
+  var notificationsSent = matchedRows.filter(function (row) {
+    return String(row[21] || "").toUpperCase() === "TRUE";
+  }).length;
+  var inventoryMutations = matchedRows.filter(function (row) {
+    return String(row[22] || "").toUpperCase() === "TRUE";
+  }).length;
+  var formalOrdersCreated = matchedRows.filter(function (row) {
+    return String(row[23] || "").toUpperCase() === "TRUE";
+  }).length;
+  var currentSnapshot = createStressSafetySnapshot_();
+  var baselineSnapshot = data.safetySnapshot || {};
+
+  return json_({
+    ok: true,
+    success: true,
+    testMode: true,
+    formalSimulationMode: true,
+    requestedUniqueCount: uniqueRequestIds.length,
+    simulationSheetRowCount: matchedRows.length,
+    missingRequestIds: missingRequestIds,
+    duplicateRequestIds: duplicateRequestIds,
+    duplicateFormalOrderNoCandidates: duplicateFormalOrderNoCandidates,
+    incompleteRequestIds: incompleteRequestIds,
+    fieldsComplete: incompleteRequestIds.length === 0,
+    formalPreordersUnchanged: stressSnapshotsEqual_(
+      baselineSnapshot.preorders,
+      currentSnapshot.preorders,
+    ),
+    productsUnchanged: stressSnapshotsEqual_(
+      baselineSnapshot.products,
+      currentSnapshot.products,
+    ),
+    notificationsSent: notificationsSent,
+    inventoryMutations: inventoryMutations,
+    formalOrdersCreated: formalOrdersCreated,
+    oversellRiskCount: oversellRiskCount,
+    formalInventoryDeductionImplemented: true,
+    formalRequestIdempotencyImplemented: true,
+    concurrencyWritePassed:
+      matchedRows.length === uniqueRequestIds.length &&
+      missingRequestIds.length === 0 &&
+      duplicateRequestIds.length === 0 &&
+      duplicateFormalOrderNoCandidates.length === 0 &&
+      incompleteRequestIds.length === 0,
+    inventorySafetyPassed: oversellRiskCount === 0,
+    currentSafetySnapshot: currentSnapshot,
+    message: "正式流程模擬核對完成；吞吐量與庫存／冪等風險分開判定",
+  });
+}
+
+function validateFormalSimulationFields_(data) {
+  if (data.formalSimulationMode !== true)
+    throw new Error("INVALID_FORMAL_SIMULATION");
+  if (!/^SIMRUN-\d{8}-\d{6}-[A-Z0-9]{4}$/.test(data.simulationRunId))
+    throw new Error("INVALID_FORMAL_SIMULATION");
+  if (!Array.isArray(data.items) || data.items.length !== 1)
+    throw new Error("INVALID_FORMAL_SIMULATION");
+  var simulatedStockLimit = Number(data.simulatedStockLimit);
+  if (
+    !Number.isInteger(simulatedStockLimit) ||
+    simulatedStockLimit < 1 ||
+    simulatedStockLimit > STRESS_TEST_MAX_REQUESTS_
+  )
+    throw new Error("INVALID_FORMAL_SIMULATION");
+}
+
+function findFormalSimulationRequestRow_(sheet, testRequestId) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var values = sheet
+    .getRange(2, 3, sheet.getLastRow() - 1, 1)
+    .getDisplayValues();
+  for (var index = 0; index < values.length; index++)
+    if (String(values[index][0] || "").trim() === testRequestId)
+      return index + 2;
+  return 0;
+}
+
+function sumFormalSimulationRunQty_(sheet, simulationRunId, productId) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, FORMAL_SIMULATION_HEADERS_.length)
+    .getDisplayValues();
+  return rows.reduce(function (total, row) {
+    if (
+      String(row[3] || "").trim() !== simulationRunId ||
+      String(row[9] || "").trim() !== productId
+    )
+      return total;
+    return total + number_(row[12]);
+  }, 0);
+}
+
+function handleCreateStressTestPreorder_(data) {
+  requireStressTestEnabled_(data);
+  validateStressTestFields_(data);
+
+  var settings = readSettings_();
+  var catalog = readProducts_(settings);
+  var productMap = {};
+  catalog.forEach(function (product) {
+    productMap[product.id] = product;
+  });
+
+  var cleanItems = [];
+  var totalQty = 0;
+  var estimatedTotal = 0;
+  data.items.forEach(function (sourceItem) {
+    var productId = String((sourceItem && sourceItem.productId) || "").trim();
+    var product = productMap[productId];
+    var qty = Number(sourceItem && sourceItem.qty);
+    if (
+      !product ||
+      !product.active ||
+      !Number.isInteger(qty) ||
+      qty < 1 ||
+      qty > 20
+    ) {
+      throw new Error("PRODUCT_CHANGED");
+    }
+    var variant = String(sourceItem.variant || "").trim();
+    if (product.variants.length && product.variants.indexOf(variant) === -1)
+      throw new Error("PRODUCT_CHANGED");
+    if (!product.variants.length && variant)
+      throw new Error("PRODUCT_CHANGED");
+
+    var unitTwd = product.priceTwd;
+    cleanItems.push({
+      productId: product.id,
+      name: product.name,
+      variant: variant,
+      qty: qty,
+      unitPriceTwd: unitTwd,
+      subtotalTwd: unitTwd * qty,
+    });
+    totalQty += qty;
+    estimatedTotal += unitTwd * qty;
+  });
+  if (!cleanItems.length || totalQty > 100) throw new Error("INVALID_ITEMS");
+
+  var depositTotal = Math.ceil(
+    estimatedTotal * (settings.depositPercent / 100),
+  );
+  var estimatedBalance = estimatedTotal - depositTotal;
+  var itemsSummary = cleanItems
+    .map(function (item) {
+      return (
+        item.name +
+        (item.variant ? "｜" + item.variant : "") +
+        " × " +
+        item.qty
+      );
+    })
+    .join("\n");
+  var safePayload = {
+    action: "createPreorder",
+    idToken: "TEST_MODE_NO_LINE_TOKEN",
+    lineDisplayName: cleanText_(data.lineDisplayName, 80),
+    customerName: cleanText_(data.customerName, 30),
+    phone: cleanText_(data.phone, 20),
+    note: cleanText_(data.note, 300),
+    items: data.items,
+    testMode: true,
+    testRequestId: data.testRequestId,
+  };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = spreadsheet_();
+    var sheet = ensureSheet_(
+      ss,
+      STRESS_TEST_SHEET_NAME_,
+      STRESS_TEST_HEADERS_,
+    );
+    var existingRow = findStressTestRequestRow_(sheet, data.testRequestId);
+    if (existingRow) {
+      return json_({
+        ok: true,
+        success: true,
+        duplicate: true,
+        testMode: true,
+        testRequestId: data.testRequestId,
+        testOrderId: sheet.getRange(existingRow, 1).getDisplayValue(),
+        message: "此測試請求已處理，未重複建立",
+      });
+    }
+
+    var now = new Date();
+    var testOrderId = createUniqueStressTestOrderId_(sheet, now);
+
+    sheet.appendRow([
+      testOrderId,
+      data.testRequestId,
+      formatDateTime_(now),
+      true,
+      safePayload.lineDisplayName,
+      safePayload.customerName,
+      safePayload.phone,
+      safePayload.note,
+      JSON.stringify(cleanItems),
+      itemsSummary,
+      totalQty,
+      estimatedTotal,
+      depositTotal,
+      estimatedBalance,
+      JSON.stringify(safePayload),
+      false,
+      false,
+      false,
+    ]);
+
+    return json_({
+      ok: true,
+      success: true,
+      duplicate: false,
+      testMode: true,
+      testRequestId: data.testRequestId,
+      testOrderId: testOrderId,
+      message: "壓力測試訂單寫入成功",
+    });
   } finally {
     lock.releaseLock();
   }
+}
+
+function handleVerifyStressTestResults_(data) {
+  requireStressTestEnabled_(data);
+  var requestIds = Array.isArray(data.testRequestIds)
+    ? data.testRequestIds.map(function (value) {
+        return String(value || "").trim();
+      })
+    : [];
+  if (
+    !requestIds.length ||
+    requestIds.length > STRESS_TEST_MAX_REQUESTS_ ||
+    requestIds.some(function (value) {
+      return !isValidStressTestRequestId_(value);
+    })
+  )
+    throw new Error("INVALID_TEST_REQUEST_ID");
+
+  var requested = {};
+  requestIds.forEach(function (value) {
+    requested[value] = true;
+  });
+  var uniqueRequestIds = Object.keys(requested);
+  var sheet = spreadsheet_().getSheetByName(STRESS_TEST_SHEET_NAME_);
+  var rows =
+    sheet && sheet.getLastRow() > 1
+      ? sheet
+          .getRange(
+            2,
+            1,
+            sheet.getLastRow() - 1,
+            STRESS_TEST_HEADERS_.length,
+          )
+          .getDisplayValues()
+      : [];
+  var matchedRows = rows.filter(function (row) {
+    return requested[String(row[1] || "").trim()] === true;
+  });
+  var requestCounts = {};
+  var orderCounts = {};
+  matchedRows.forEach(function (row) {
+    var requestId = String(row[1] || "").trim();
+    var orderId = String(row[0] || "").trim();
+    requestCounts[requestId] = (requestCounts[requestId] || 0) + 1;
+    orderCounts[orderId] = (orderCounts[orderId] || 0) + 1;
+  });
+  var missingRequestIds = uniqueRequestIds.filter(function (value) {
+    return !requestCounts[value];
+  });
+  var duplicateRequestIds = Object.keys(requestCounts).filter(function (value) {
+    return requestCounts[value] > 1;
+  });
+  var duplicateTestOrderIds = Object.keys(orderCounts).filter(function (value) {
+    return value && orderCounts[value] > 1;
+  });
+  var incompleteRequestIds = matchedRows
+    .filter(function (row) {
+      return (
+        String(row[0] || "").indexOf("TEST-") !== 0 ||
+        String(row[3] || "").toUpperCase() !== "TRUE" ||
+        row.slice(0, 15).some(function (value) {
+          return String(
+            value === undefined || value === null ? "" : value,
+          ).trim() === "";
+        })
+      );
+    })
+    .map(function (row) {
+      return String(row[1] || "").trim();
+    });
+  var currentSnapshot = createStressSafetySnapshot_();
+  var baselineSnapshot = data.safetySnapshot || {};
+  var notificationsSent = matchedRows.filter(function (row) {
+    return String(row[15] || "").toUpperCase() === "TRUE";
+  }).length;
+  var inventoryMutations = matchedRows.filter(function (row) {
+    return String(row[16] || "").toUpperCase() === "TRUE";
+  }).length;
+  var formalOrdersCreated = matchedRows.filter(function (row) {
+    return String(row[17] || "").toUpperCase() === "TRUE";
+  }).length;
+
+  return json_({
+    ok: true,
+    success: true,
+    testMode: true,
+    requestedUniqueCount: uniqueRequestIds.length,
+    testSheetRowCount: matchedRows.length,
+    missingRequestIds: missingRequestIds,
+    duplicateRequestIds: duplicateRequestIds,
+    duplicateTestOrderIds: duplicateTestOrderIds,
+    incompleteRequestIds: incompleteRequestIds,
+    fieldsComplete: incompleteRequestIds.length === 0,
+    formalPreordersUnchanged: stressSnapshotsEqual_(
+      baselineSnapshot.preorders,
+      currentSnapshot.preorders,
+    ),
+    productsUnchanged: stressSnapshotsEqual_(
+      baselineSnapshot.products,
+      currentSnapshot.products,
+    ),
+    notificationsSent: notificationsSent,
+    inventoryMutations: inventoryMutations,
+    formalOrdersCreated: formalOrdersCreated,
+    currentSafetySnapshot: currentSnapshot,
+    message: "壓力測試結果核對完成",
+  });
+}
+
+function requireStressTestEnabled_(data) {
+  if (!data || data.testMode !== true) throw new Error("INVALID_TEST_MODE");
+  var enabled =
+    String(
+      PropertiesService.getScriptProperties().getProperty(
+        "ENABLE_STRESS_TEST_MODE",
+      ) || "",
+    ).toLowerCase() === "true";
+  if (!enabled) throw new Error("STRESS_TEST_DISABLED");
+}
+
+function validateStressTestFields_(data) {
+  if (!isValidStressTestRequestId_(data.testRequestId))
+    throw new Error("INVALID_TEST_REQUEST_ID");
+  if (String(data.idToken || "") !== "TEST_MODE_NO_LINE_TOKEN")
+    throw new Error("REAL_CUSTOMER_DATA_FORBIDDEN");
+  if (!/^壓測測試\d{3}$/.test(String(data.customerName || "").trim()))
+    throw new Error("REAL_CUSTOMER_DATA_FORBIDDEN");
+  if (!/^壓測測試\d{3}$/.test(String(data.lineDisplayName || "").trim()))
+    throw new Error("REAL_CUSTOMER_DATA_FORBIDDEN");
+  if (!/^090000\d{4}$/.test(String(data.phone || "").trim()))
+    throw new Error("REAL_CUSTOMER_DATA_FORBIDDEN");
+  var note = String(data.note || "").trim();
+  if (
+    note.indexOf("TEST MODE") === -1 ||
+    note.indexOf("不得通知") === -1 ||
+    note.indexOf("不得出貨") === -1
+  )
+    throw new Error("REAL_CUSTOMER_DATA_FORBIDDEN");
+  validatePreorderFields_(data);
+}
+
+function isValidStressTestRequestId_(value) {
+  return /^LOAD-\d{8}-\d{6}-[A-Z0-9]{4}-\d{3}$/.test(
+    String(value || "").trim(),
+  );
+}
+
+function findStressTestRequestRow_(sheet, testRequestId) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var values = sheet
+    .getRange(2, 2, sheet.getLastRow() - 1, 1)
+    .getDisplayValues();
+  for (var index = 0; index < values.length; index++)
+    if (String(values[index][0] || "").trim() === testRequestId)
+      return index + 2;
+  return 0;
+}
+
+function createUniqueStressTestOrderId_(sheet, date) {
+  var existing = {};
+  if (sheet.getLastRow() > 1) {
+    sheet
+      .getRange(2, 1, sheet.getLastRow() - 1, 1)
+      .getDisplayValues()
+      .forEach(function (row) {
+        existing[String(row[0] || "").trim()] = true;
+      });
+  }
+  for (var attempt = 0; attempt < 5; attempt++) {
+    var value =
+      "TEST-" +
+      Utilities.formatDate(
+        date,
+        Session.getScriptTimeZone(),
+        "yyyyMMdd-HHmmss",
+      ) +
+      "-" +
+      Utilities.getUuid().replace(/-/g, "").slice(0, 6).toUpperCase();
+    if (!existing[value]) return value;
+  }
+  throw new Error("TEST_ORDER_ID_COLLISION");
+}
+
+function createStressSafetySnapshot_() {
+  var ss = spreadsheet_();
+  return {
+    preorders: createSheetSafetySignature_(
+      ss.getSheetByName("Preorders"),
+      ORDER_HEADERS_.length,
+    ),
+    products: createSheetSafetySignature_(
+      ss.getSheetByName("Products"),
+      PRODUCT_HEADERS_.length,
+    ),
+  };
+}
+
+function createSheetSafetySignature_(sheet, columnCount) {
+  if (!sheet)
+    return { exists: false, rowCount: 0, digest: sha256_("[]") };
+  var rowCount = sheet.getLastRow();
+  var values = rowCount
+    ? sheet.getRange(1, 1, rowCount, columnCount).getDisplayValues()
+    : [];
+  return {
+    exists: true,
+    rowCount: rowCount,
+    digest: sha256_(JSON.stringify(values)),
+  };
+}
+
+function stressSnapshotsEqual_(before, after) {
+  return (
+    !!before &&
+    !!after &&
+    before.exists === after.exists &&
+    Number(before.rowCount) === Number(after.rowCount) &&
+    String(before.digest || "") === String(after.digest || "")
+  );
+}
+
+function handleCreatePreorder_(data) {
+  var profile = verifyLineIdToken_(data.idToken);
+  validatePreorderFields_(data);
+  validateOrderRequestId_(data.requestId);
+  setupQuokkaPreorder();
+  var settings = readSettings_();
+  if (settings.saleClosed) throw new Error("SALE_CLOSED");
+
+  // 一般商品與金額檢查先在鎖外完成；取得鎖後仍會重新讀取商品列與庫存。
+  prepareOrderItems_(data.items, readProducts_(settings));
+
+  var lock = LockService.getScriptLock();
+  var orderResult;
+  var lockAcquired = false;
+  var inventoryChanged = false;
+  try {
+    lock.waitLock(30000);
+    lockAcquired = true;
+  } catch (error) {
+    throw new Error("LOCK_TIMEOUT");
+  }
+  try {
+    var ss = spreadsheet_();
+    var sheet = ss.getSheetByName("Preorders");
+    var requestSheet = ensureSheet_(
+      ss,
+      ORDER_REQUEST_SHEET_NAME_,
+      ORDER_REQUEST_HEADERS_,
+    );
+    var existingRequestRow = findOrderRequestRow_(requestSheet, data.requestId);
+    if (existingRequestRow) {
+      var existingRequest = requestSheet
+        .getRange(existingRequestRow, 1, 1, ORDER_REQUEST_HEADERS_.length)
+        .getDisplayValues()[0];
+      if (String(existingRequest[2] || "").trim() !== profile.sub)
+        throw new Error("ORDER_REQUEST_CONFLICT");
+      if (
+        String(existingRequest[3] || "").trim() !==
+        orderRequestPayloadDigest_(data)
+      )
+        throw new Error("ORDER_REQUEST_CONFLICT");
+      var existingOrderRow = findOrderRow_(sheet, existingRequest[1]);
+      if (!existingOrderRow) throw new Error("ORDER_REQUEST_CONFLICT");
+      orderResult = orderResultFromRow_(
+        sheet
+          .getRange(existingOrderRow, 1, 1, ORDER_HEADERS_.length)
+          .getDisplayValues()[0],
+      );
+      orderResult.duplicate = true;
+    } else {
+      if (readSaleClosedFlag_()) throw new Error("SALE_CLOSED");
+      var reservation = prepareInventoryReservation_(data.items, settings);
+      var cleanItems = reservation.cleanItems;
+      var totalQty = reservation.totalQty;
+      var estimatedTotal = reservation.estimatedTotal;
+      var depositTotal = Math.ceil(
+        estimatedTotal * (settings.depositPercent / 100),
+      );
+      var estimatedBalance = estimatedTotal - depositTotal;
+      var now = new Date();
+      var orderNo = createOrderNo_(now);
+      var itemsSummary = summarizeOrderItems_(cleanItems);
+      var orderRowValues = buildNewOrderRow_(
+        data,
+        profile,
+        settings,
+        now,
+        orderNo,
+        cleanItems,
+        itemsSummary,
+        totalQty,
+        estimatedTotal,
+        depositTotal,
+        estimatedBalance,
+      );
+      var appliedUpdates = [];
+      var appendedOrderRow = 0;
+      try {
+        reservation.updates.forEach(function (update) {
+          appliedUpdates.push(update);
+          reservation.productSheet
+            .getRange(update.rowNumber, 8)
+            .setValue(update.newStatus);
+          reservation.productSheet
+            .getRange(update.rowNumber, 13)
+            .setValue(update.newStock);
+        });
+        inventoryChanged = appliedUpdates.length > 0;
+        sheet.appendRow(orderRowValues);
+        appendedOrderRow = sheet.getLastRow();
+        requestSheet.appendRow([
+          data.requestId,
+          orderNo,
+          profile.sub,
+          orderRequestPayloadDigest_(data),
+          formatDateTime_(now),
+          "created",
+        ]);
+      } catch (error) {
+        try {
+          if (appendedOrderRow) sheet.deleteRow(appendedOrderRow);
+          appliedUpdates.forEach(function (update) {
+            reservation.productSheet
+              .getRange(update.rowNumber, 8)
+              .setValue(update.oldStatus);
+            reservation.productSheet
+              .getRange(update.rowNumber, 13)
+              .setValue(update.oldStock);
+          });
+          inventoryChanged = false;
+        } catch (rollbackError) {
+          console.error("Order rollback failed: " + safeError_(rollbackError));
+        }
+        throw new Error("ORDER_WRITE_FAILED");
+      }
+      orderResult = {
+        orderNo: orderNo,
+        createdAt: formatDateTime_(now),
+        customerName: cleanText_(data.customerName, 30),
+        items: cleanItems,
+        itemsSummary: itemsSummary,
+        totalQty: totalQty,
+        estimatedTotal: estimatedTotal,
+        depositTotal: depositTotal,
+        estimatedBalance: estimatedBalance,
+        depositPercent: settings.depositPercent,
+        paymentDeadlineAt: formatDateTime_(
+          new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
+        ),
+        duplicate: false,
+      };
+    }
+  } finally {
+    if (lockAcquired) lock.releaseLock();
+  }
+  if (inventoryChanged) invalidatePublicCatalogCache_();
+  if (orderResult.duplicate)
+    return json_({
+      ok: true,
+      duplicate: true,
+      orderNo: orderResult.orderNo,
+      estimatedTotal: orderResult.estimatedTotal,
+      depositTotal: orderResult.depositTotal,
+      estimatedBalance: orderResult.estimatedBalance,
+      botMessageSent: false,
+    });
   var botMessageSent = pushOrderSuccessCard_(profile.sub, orderResult);
   return json_({
     ok: true,
+    duplicate: false,
     orderNo: orderResult.orderNo,
     estimatedTotal: orderResult.estimatedTotal,
     depositTotal: orderResult.depositTotal,
     estimatedBalance: orderResult.estimatedBalance,
     botMessageSent: botMessageSent,
   });
+}
+
+function validateOrderRequestId_(requestId) {
+  var value = String(requestId || "").trim();
+  if (!/^ORDER-\d{8}-\d{6}-[A-Z0-9]{8,32}$/.test(value))
+    throw new Error("INVALID_ORDER_REQUEST_ID");
+}
+
+function orderRequestPayloadDigest_(data) {
+  var items = (data.items || []).map(function (item) {
+    return {
+      productId: String((item && item.productId) || "").trim(),
+      variant: String((item && item.variant) || "").trim(),
+      qty: Number(item && item.qty),
+    };
+  });
+  return sha256_(
+    JSON.stringify({
+      customerName: cleanText_(data.customerName, 30),
+      phone: cleanText_(data.phone, 20),
+      note: cleanText_(data.note, 300),
+      items: items,
+    }),
+  );
+}
+
+function findOrderRequestRow_(sheet, requestId) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var values = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, 1)
+    .getDisplayValues();
+  for (var index = 0; index < values.length; index++)
+    if (String(values[index][0] || "").trim() === requestId) return index + 2;
+  return 0;
+}
+
+function prepareOrderItems_(sourceItems, catalog) {
+  var productMap = {};
+  (catalog || []).forEach(function (product) {
+    productMap[product.id] = product;
+  });
+  var cleanItems = [];
+  var totalQty = 0;
+  var estimatedTotal = 0;
+  (sourceItems || []).forEach(function (sourceItem) {
+    var productId = String((sourceItem && sourceItem.productId) || "").trim();
+    var product = productMap[productId];
+    var qty = Number(sourceItem && sourceItem.qty);
+    if (product && product.stockQuantity === 0)
+      throw new Error("OUT_OF_STOCK");
+    if (
+      !product ||
+      !product.active ||
+      !Number.isInteger(qty) ||
+      qty < 1 ||
+      qty > 20
+    )
+      throw new Error("PRODUCT_CHANGED");
+    var variant = String(sourceItem.variant || "").trim();
+    if (product.variants.length && product.variants.indexOf(variant) === -1)
+      throw new Error("PRODUCT_CHANGED");
+    if (!product.variants.length && variant)
+      throw new Error("PRODUCT_CHANGED");
+    cleanItems.push({
+      productId: product.id,
+      name: product.name,
+      variant: variant,
+      qty: qty,
+      unitPriceTwd: product.priceTwd,
+      subtotalTwd: product.priceTwd * qty,
+    });
+    totalQty += qty;
+    estimatedTotal += product.priceTwd * qty;
+  });
+  if (!cleanItems.length || totalQty > 100) throw new Error("INVALID_ITEMS");
+  return {
+    cleanItems: cleanItems,
+    totalQty: totalQty,
+    estimatedTotal: estimatedTotal,
+  };
+}
+
+function prepareInventoryReservation_(sourceItems, settings) {
+  var productSheet = spreadsheet_().getSheetByName("Products");
+  if (!productSheet || productSheet.getLastRow() < 2)
+    throw new Error("PRODUCT_CHANGED");
+  var rows = productSheet
+    .getRange(2, 1, productSheet.getLastRow() - 1, PRODUCT_HEADERS_.length)
+    .getValues();
+  var catalog = [];
+  var rowByProductId = {};
+  rows.forEach(function (row, index) {
+    var product = rowToProduct_(row, settings.exchangeRate);
+    if (!product.id) return;
+    catalog.push(product);
+    rowByProductId[product.id] = {
+      rowNumber: index + 2,
+      row: row,
+      product: product,
+    };
+  });
+  var prepared = prepareOrderItems_(sourceItems, catalog);
+  var requestedByProduct = {};
+  prepared.cleanItems.forEach(function (item) {
+    requestedByProduct[item.productId] =
+      (requestedByProduct[item.productId] || 0) + item.qty;
+  });
+  var updates = [];
+  Object.keys(requestedByProduct).forEach(function (productId) {
+    var source = rowByProductId[productId];
+    if (!source) throw new Error("PRODUCT_CHANGED");
+    var product = source.product;
+    if (product.stockQuantity === null) return;
+    var requestedQty = requestedByProduct[productId];
+    if (product.stockQuantity < requestedQty) throw new Error("OUT_OF_STOCK");
+    var newStock = product.stockQuantity - requestedQty;
+    updates.push({
+      rowNumber: source.rowNumber,
+      oldStatus: String(source.row[7] || ""),
+      oldStock: source.row[12],
+      newStatus: newStock === 0 ? "下架" : String(source.row[7] || "上架"),
+      newStock: newStock,
+    });
+  });
+  prepared.productSheet = productSheet;
+  prepared.updates = updates;
+  return prepared;
+}
+
+function readSaleClosedFlag_() {
+  var sheet = spreadsheet_().getSheetByName("Settings");
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  for (var index = 0; index < rows.length; index++)
+    if (String(rows[index][0] || "").trim() === "saleClosed")
+      return String(rows[index][1] || "").toLowerCase() === "true";
+  return false;
+}
+
+function buildNewOrderRow_(
+  data,
+  profile,
+  settings,
+  now,
+  orderNo,
+  cleanItems,
+  itemsSummary,
+  totalQty,
+  estimatedTotal,
+  depositTotal,
+  estimatedBalance,
+) {
+  return [
+    orderNo,
+    formatDateTime_(now),
+    profile.sub,
+    String(data.lineDisplayName || profile.name || "").trim().slice(0, 80),
+    cleanText_(data.customerName, 30),
+    cleanText_(data.phone, 20),
+    JSON.stringify(cleanItems),
+    itemsSummary,
+    totalQty,
+    estimatedTotal,
+    depositTotal,
+    estimatedBalance,
+    "",
+    "",
+    cleanText_(data.note, 300),
+    ORDER_STATUS_PENDING_,
+    "",
+    "未開設賣場",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    settings.depositPercent,
+    formatDateTime_(
+      new Date(now.getTime() + settings.paymentReminderHours * 3600000),
+    ),
+    formatDateTime_(
+      new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
+    ),
+    formatDateTime_(
+      new Date(
+        now.getTime() +
+          (settings.paymentDeadlineHours + settings.paymentGraceHours) *
+            3600000,
+      ),
+    ),
+    "",
+    "",
+  ];
+}
+
+function orderResultFromRow_(row) {
+  return {
+    orderNo: String(row[0] || "").trim(),
+    createdAt: row[1],
+    customerName: row[4],
+    items: parseJsonArray_(row[6]),
+    itemsSummary: row[7],
+    totalQty: number_(row[8]),
+    estimatedTotal: number_(row[9]),
+    depositTotal: number_(row[10]),
+    estimatedBalance: number_(row[11]),
+    depositPercent: number_(row[34]),
+    paymentDeadlineAt: row[36],
+  };
 }
 
 function pushOrderSuccessCard_(lineUserId, order) {
@@ -1353,6 +2395,7 @@ function handleAdminResolveLineAlert_(data) {
   var result;
   var notificationTarget;
   var notificationType = "";
+  var cancellation;
   lock.waitLock(10000);
   try {
     setupQuokkaPreorder();
@@ -1437,12 +2480,8 @@ function handleAdminResolveLineAlert_(data) {
           new Date().getTime() < paymentSchedule.autoCancelAt.getTime()
         )
           throw new Error("ORDER_CANCEL_NOT_DUE");
-        var cancelledAt = formatDateTime_(new Date());
-        orderSheet.getRange(orderRow, 16).setValue(ORDER_STATUS_CANCELLED_);
-        orderSheet
-          .getRange(orderRow, 18, 1, 2)
-          .setValues([["未開設賣場", ""]]);
-        orderSheet.getRange(orderRow, 21).setValue(cancelledAt);
+        cancellation = cancelOrderRowLocked_(orderSheet, orderRow, order);
+        var cancelledAt = cancellation.cancelledAt;
         notificationType = "cancelled";
       }
     }
@@ -1470,6 +2509,10 @@ function handleAdminResolveLineAlert_(data) {
           : order[20],
       resolved: resolved,
       duplicate: duplicate,
+      stockRestoredQty: cancellation ? cancellation.stockRestoredQty : 0,
+      stockRestoredProducts: cancellation
+        ? cancellation.stockRestoredProducts
+        : 0,
     };
     notificationTarget = {
       lineUserId: order[2],
@@ -1486,6 +2529,8 @@ function handleAdminResolveLineAlert_(data) {
   } finally {
     lock.releaseLock();
   }
+  if (cancellation && cancellation.stockRestoredProducts)
+    invalidatePublicCatalogCache_();
   var notificationSent = false;
   if (notificationType === "received")
     notificationSent = pushLineMessage_(
@@ -2656,6 +3701,106 @@ function processExpiredPreorders() {
   return expiredOrderNos.length;
 }
 
+function prepareInventoryRestock_(itemsJson) {
+  var items;
+  try {
+    items = JSON.parse(String(itemsJson || "[]"));
+  } catch (error) {
+    throw new Error("INVALID_ORDER_ITEMS");
+  }
+  if (!Array.isArray(items)) throw new Error("INVALID_ORDER_ITEMS");
+  var quantities = {};
+  items.forEach(function (item) {
+    var productId = String((item && item.productId) || "").trim();
+    var qty = Number(item && item.qty);
+    if (!productId || !Number.isInteger(qty) || qty < 1)
+      throw new Error("INVALID_ORDER_ITEMS");
+    quantities[productId] = (quantities[productId] || 0) + qty;
+  });
+  var productIds = Object.keys(quantities);
+  if (!productIds.length) throw new Error("INVALID_ORDER_ITEMS");
+  var productSheet = spreadsheet_().getSheetByName("Products");
+  if (!productSheet || productSheet.getLastRow() < 2)
+    throw new Error("PRODUCT_CHANGED");
+  var rows = productSheet
+    .getRange(2, 1, productSheet.getLastRow() - 1, PRODUCT_HEADERS_.length)
+    .getValues();
+  var productRows = {};
+  rows.forEach(function (row, index) {
+    var id = String(row[0] || "").trim();
+    if (id) productRows[id] = { rowNumber: index + 2, row: row };
+  });
+  var updates = [];
+  productIds.forEach(function (productId) {
+    var source = productRows[productId];
+    if (!source) throw new Error("PRODUCT_CHANGED");
+    var oldStock = source.row[12];
+    if (oldStock === "" || oldStock == null) return;
+    var stock = Number(oldStock);
+    if (!Number.isInteger(stock) || stock < 0)
+      throw new Error("PRODUCT_CHANGED");
+    var oldStatus = String(source.row[7] || "");
+    updates.push({
+      rowNumber: source.rowNumber,
+      oldStatus: oldStatus,
+      oldStock: oldStock,
+      newStatus:
+        stock === 0 && oldStatus === "下架" ? "上架" : oldStatus || "上架",
+      newStock: stock + quantities[productId],
+      restoredQty: quantities[productId],
+    });
+  });
+  return { productSheet: productSheet, updates: updates };
+}
+
+function applyInventoryRestock_(plan, rollback) {
+  (plan.updates || []).forEach(function (update) {
+    plan.productSheet
+      .getRange(update.rowNumber, 8)
+      .setValue(rollback ? update.oldStatus : update.newStatus);
+    plan.productSheet
+      .getRange(update.rowNumber, 13)
+      .setValue(rollback ? update.oldStock : update.newStock);
+  });
+}
+
+function cancelOrderRowLocked_(sheet, rowNumber, row) {
+  var plan = prepareInventoryRestock_(row[6]);
+  var oldOrderState = {
+    status: row[15],
+    shippingStatus: row[17],
+    shippedAt: row[18],
+    cancelledAt: row[20],
+  };
+  var cancelledAt = formatDateTime_(new Date());
+  try {
+    applyInventoryRestock_(plan, false);
+    sheet.getRange(rowNumber, 16).setValue(ORDER_STATUS_CANCELLED_);
+    sheet.getRange(rowNumber, 18, 1, 2).setValues([["未開設賣場", ""]]);
+    sheet.getRange(rowNumber, 21).setValue(cancelledAt);
+  } catch (error) {
+    try {
+      applyInventoryRestock_(plan, true);
+      sheet.getRange(rowNumber, 16).setValue(oldOrderState.status);
+      sheet
+        .getRange(rowNumber, 18, 1, 2)
+        .setValues([[oldOrderState.shippingStatus, oldOrderState.shippedAt]]);
+      sheet.getRange(rowNumber, 21).setValue(oldOrderState.cancelledAt);
+    } catch (rollbackError) {
+      console.error("Order cancellation rollback failed: " + rollbackError);
+    }
+    throw new Error("ORDER_CANCEL_WRITE_FAILED");
+  }
+  var restoredQty = plan.updates.reduce(function (total, update) {
+    return total + update.restoredQty;
+  }, 0);
+  return {
+    cancelledAt: cancelledAt,
+    stockRestoredQty: restoredQty,
+    stockRestoredProducts: plan.updates.length,
+  };
+}
+
 function cancelOrder_(orderNo, reason) {
   if (!orderNo) throw new Error("ORDER_NOT_FOUND");
   var lock = LockService.getScriptLock();
@@ -2677,6 +3822,8 @@ function cancelOrder_(orderNo, reason) {
         shippingStatus: "未開設賣場",
         cancelledAt: row[20],
         reminderDue: false,
+        duplicate: true,
+        stockRestoredQty: 0,
       };
     }
     if (
@@ -2691,10 +3838,8 @@ function cancelOrder_(orderNo, reason) {
         reminderDue: false,
       };
     }
-    var cancelledAt = formatDateTime_(new Date());
-    sheet.getRange(rowNumber, 16).setValue(ORDER_STATUS_CANCELLED_);
-    sheet.getRange(rowNumber, 18, 1, 2).setValues([["未開設賣場", ""]]);
-    sheet.getRange(rowNumber, 21).setValue(cancelledAt);
+    var cancellation = cancelOrderRowLocked_(sheet, rowNumber, row);
+    var cancelledAt = cancellation.cancelledAt;
     target = {
       lineUserId: row[2],
       orderNo: row[0],
@@ -2710,6 +3855,8 @@ function cancelOrder_(orderNo, reason) {
   } finally {
     lock.releaseLock();
   }
+  if (cancellation.stockRestoredProducts)
+    invalidatePublicCatalogCache_();
   var notificationSent = pushLineMessage_(
     target.lineUserId,
     buildUnifiedCancellationCard_(target),
@@ -2723,6 +3870,9 @@ function cancelOrder_(orderNo, reason) {
     cancelledAt: cancelledAt,
     reminderDue: false,
     notificationSent: notificationSent,
+    duplicate: false,
+    stockRestoredQty: cancellation.stockRestoredQty,
+    stockRestoredProducts: cancellation.stockRestoredProducts,
   };
 }
 
@@ -3687,6 +4837,19 @@ function safeError_(error) {
     "INVALID_SETTINGS",
     "SPREADSHEET_CONFIG_MISSING",
     "SALE_CLOSED",
+    "INVALID_TEST_MODE",
+    "STRESS_TEST_DISABLED",
+    "INVALID_TEST_REQUEST_ID",
+    "INVALID_FORMAL_SIMULATION",
+    "REAL_CUSTOMER_DATA_FORBIDDEN",
+    "TEST_ORDER_ID_COLLISION",
+    "INVALID_ORDER_REQUEST_ID",
+    "ORDER_REQUEST_CONFLICT",
+    "OUT_OF_STOCK",
+    "LOCK_TIMEOUT",
+    "ORDER_WRITE_FAILED",
+    "INVALID_ORDER_ITEMS",
+    "ORDER_CANCEL_WRITE_FAILED",
   ];
   return allowed.indexOf(message) >= 0 ? message : "SERVER_ERROR";
 }

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <meta name="theme-color" content="#2b1717" />
+    <title>鼠購易｜安全訂單併發壓力測試</title>
+    <link rel="stylesheet" href="stress-test.css?v=20260801" />
+    <script src="stress-test.js?v=20260801" defer></script>
+  </head>
+  <body>
+    <main class="stress-shell">
+      <header class="page-header">
+        <p class="eyebrow">ISOLATED LOAD TEST</p>
+        <h1>安全訂單併發壓力測試</h1>
+        <p>只允許連接已啟用 <code>ENABLE_STRESS_TEST_MODE=true</code> 的測試部署。</p>
+      </header>
+
+      <section class="danger-banner" role="alert">
+        <strong>禁止使用正式環境，除非後端已確認支援 testMode。</strong>
+        <span>工具會先執行無副作用安全握手；握手不通過時不會送出任何測試訂單。</span>
+      </section>
+
+      <section class="panel controls-panel">
+        <form id="stressForm" autocomplete="off">
+          <label class="field field-wide">
+            <span>GAS 測試 Web App URL</span>
+            <input id="gasUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/測試部署ID/exec" required />
+            <small>刻意不預填 config.js 的網址，避免誤用正式部署。</small>
+          </label>
+
+          <label class="field">
+            <span>測試總筆數（最多 20）</span>
+            <input id="requestCount" type="number" min="1" max="20" step="1" value="5" required />
+          </label>
+
+          <label class="field">
+            <span>每批同時送出</span>
+            <select id="concurrency">
+              <option value="5">同時送出 5 筆</option>
+              <option value="10">同時送出 10 筆</option>
+              <option value="20">同時送出 20 筆</option>
+            </select>
+          </label>
+
+          <div class="button-row field-wide">
+            <button class="primary-button" id="startTest" type="submit">開始壓力測試</button>
+            <button class="secondary-button" id="duplicateTest" type="button">測試重複請求</button>
+            <button class="secondary-button" id="formalSimulationTest" type="button">正式流程模擬（庫存上限 1）</button>
+            <button class="stop-button" id="stopTest" type="button" disabled>停止後續批次</button>
+          </div>
+          <p class="field-wide safety-note">
+            正式流程模擬會沿用正式鎖、價格、訂金及編號產生規則，但只寫入獨立模擬表；庫存上限固定模擬為 1，用來檢查多人搶最後一件時是否超賣。
+          </p>
+        </form>
+      </section>
+
+      <section class="panel progress-panel" aria-live="polite">
+        <div class="section-heading">
+          <div><p class="eyebrow">PROGRESS</p><h2>測試進度</h2></div>
+          <strong id="progressText">尚未開始</strong>
+        </div>
+        <progress id="progressBar" max="1" value="0"></progress>
+        <p class="status-message" id="statusMessage">請先貼上獨立測試部署網址。</p>
+      </section>
+
+      <section class="panel" id="summaryPanel" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">SUMMARY</p><h2>測試結果摘要</h2></div>
+          <span class="result-badge" id="resultBadge">待判定</span>
+        </div>
+        <div class="summary-grid">
+          <div><span>總請求數</span><strong id="totalRequests">0</strong></div>
+          <div><span>成功數</span><strong id="successCount">0</strong></div>
+          <div><span>失敗數</span><strong id="failureCount">0</strong></div>
+          <div><span>重複攔截數</span><strong id="duplicateCount">0</strong></div>
+          <div><span>最快回應</span><strong id="fastestTime">—</strong></div>
+          <div><span>最慢回應</span><strong id="slowestTime">—</strong></div>
+          <div><span>平均回應</span><strong id="averageTime">—</strong></div>
+          <div><span>HTTP 錯誤數</span><strong id="httpErrorCount">0</strong></div>
+          <div><span>後端 success:false</span><strong id="backendFailureCount">0</strong></div>
+        </div>
+        <div class="acceptance-box">
+          <h3>驗收結果</h3>
+          <ul id="acceptanceList"></ul>
+        </div>
+      </section>
+
+      <section class="panel" id="detailsPanel" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">REQUEST DETAILS</p><h2>每筆請求詳細結果</h2></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>測試編號</th>
+                <th>testRequestId</th>
+                <th>HTTP 狀態</th>
+                <th>是否成功</th>
+                <th>後端回傳內容</th>
+                <th>開始時間</th>
+                <th>結束時間</th>
+                <th>執行秒數</th>
+                <th>錯誤訊息</th>
+              </tr>
+            </thead>
+            <tbody id="resultRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

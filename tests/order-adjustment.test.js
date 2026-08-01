@@ -51,6 +51,7 @@ function createHarness(status, overrides = {}, options = {}) {
     row[Number(key)] = overrides[key];
   });
 
+  let failCancelOnce = Boolean(options.failOrderCancelWrite);
   const sheet = {
     getLastRow: () => 2,
     getRange(_rowNumber, column, _rowCount, columnCount = 1) {
@@ -64,7 +65,47 @@ function createHarness(status, overrides = {}, options = {}) {
           return this;
         },
         setValue(value) {
+          if (column === 16 && value === "已取消" && failCancelOnce) {
+            failCancelOnce = false;
+            throw new Error("simulated order write failure");
+          }
           row[column - 1] = value;
+          return this;
+        },
+      };
+    },
+  };
+  const productRow = Array(context.PRODUCT_HEADERS_.length).fill("");
+  Object.assign(productRow, {
+    0: "p1",
+    1: "商品 A",
+    5: JSON.stringify(["紅"]),
+    7: "上架",
+    8: 1,
+    11: 100,
+    12: options.productStock === undefined ? 5 : options.productStock,
+    13: "[]",
+  });
+  const productSheet = {
+    getLastRow: () => 2,
+    getRange(_rowNumber, column, _rowCount, columnCount = 1) {
+      return {
+        getValues: () => [
+          productRow.slice(column - 1, column - 1 + columnCount),
+        ],
+        getDisplayValues: () => [
+          productRow
+            .slice(column - 1, column - 1 + columnCount)
+            .map((value) => String(value ?? "")),
+        ],
+        setValues(values) {
+          values[0].forEach((value, index) => {
+            productRow[column - 1 + index] = value;
+          });
+          return this;
+        },
+        setValue(value) {
+          productRow[column - 1] = value;
           return this;
         },
       };
@@ -114,8 +155,11 @@ function createHarness(status, overrides = {}, options = {}) {
   context.Session = { getScriptTimeZone: () => "Asia/Taipei" };
   context.setupQuokkaPreorder = () => {};
   context.spreadsheet_ = () => ({
-    getSheetByName: (name) =>
-      name === "LineInboundEvents" ? eventSheet : sheet,
+    getSheetByName: (name) => {
+      if (name === "LineInboundEvents") return eventSheet;
+      if (name === "Products") return productSheet;
+      return sheet;
+    },
   });
   context.findOrderRow_ = () => 2;
   context.readProducts_ = () => [
@@ -143,7 +187,8 @@ function createHarness(status, overrides = {}, options = {}) {
     return Boolean(options.pushResult);
   };
   context.json_ = (payload) => payload;
-  return { context, row, eventRows, pushes };
+  context.invalidatePublicCatalogCache_ = () => {};
+  return { context, row, productRow, eventRows, pushes };
 }
 
 function dateTimeHoursAgo(hours) {
@@ -224,13 +269,27 @@ test("新訂單會保存成立當時的訂金與付款期限規則", () => {
       active: true,
     },
   ];
-  context.spreadsheet_ = () => ({
-    getSheetByName: () => ({
+  const orderSheet = {
       appendRow(row) {
         appendedRow = row;
       },
-    }),
+      getLastRow() { return 2; },
+    };
+  const requestSheet = { appendRow() {}, getLastRow() { return 1; } };
+  context.spreadsheet_ = () => ({
+    getSheetByName(name) { return name === "Preorders" ? orderSheet : null; },
   });
+  context.ensureSheet_ = () => requestSheet;
+  context.findOrderRequestRow_ = () => 0;
+  context.readSaleClosedFlag_ = () => false;
+  context.prepareInventoryReservation_ = () => ({
+    cleanItems: [{ productId: "p1", name: "商品 A", variant: "", qty: 1, unitPriceTwd: 200, subtotalTwd: 200 }],
+    totalQty: 1,
+    estimatedTotal: 200,
+    updates: [],
+    productSheet: null,
+  });
+  context.sha256_ = () => "digest";
   context.Utilities = {
     getUuid: () => "12345678901234567890",
   };
@@ -240,6 +299,7 @@ test("新訂單會保存成立當時的訂金與付款期限規則", () => {
   context.createOrderNo_ = () => "QK-NEW";
 
   const result = context.handleCreatePreorder_({
+    requestId: "ORDER-20260801-203015-TEST0001",
     idToken: "token",
     lineDisplayName: "Zoe",
     customerName: "Zoe",
@@ -529,7 +589,7 @@ test("滿25小時後不能只解除保護", () => {
 });
 
 test("滿25小時的非付款訊息可立即取消、清除警示並通知", () => {
-  const { context, row, eventRows, pushes } = createHarness(
+  const { context, row, productRow, eventRows, pushes } = createHarness(
     "待收訂金",
     { 1: dateTimeHoursAgo(26) },
     { pushResult: true },
@@ -544,8 +604,66 @@ test("滿25小時的非付款訊息可立即取消、清除警示並通知", () 
   assert.equal(row[17], "未開設賣場");
   assert.equal(row[20], "2026-07-29 14:00:00");
   assert.equal(eventRows[0][7], "已核對");
+  assert.equal(productRow[12], 7);
   assert.equal(pushes.length, 1);
   assert.match(pushes[0][1].altText, /訂單已取消/);
+});
+
+test("同一張逾期取消訂單重複處理時庫存只加回一次", () => {
+  const { context, productRow } = createHarness(
+    "待收訂金",
+    { 1: dateTimeHoursAgo(26) },
+    { pushResult: true },
+  );
+  context.handleAdminResolveLineAlert_({
+    orderNo: "QK-TEST",
+    decision: "cancel_overdue",
+  });
+  const duplicate = context.handleAdminResolveLineAlert_({
+    orderNo: "QK-TEST",
+    decision: "cancel_overdue",
+  });
+  assert.equal(productRow[12], 7);
+  assert.equal(duplicate.order.duplicate, true);
+});
+
+test("一般取消會回補庫存，重複取消不會再次回補或通知", () => {
+  const { context, productRow, pushes } = createHarness("待收訂金", {}, {
+    pushResult: true,
+  });
+  const first = context.cancelOrder_("QK-TEST", "管理員取消");
+  const duplicate = context.cancelOrder_("QK-TEST", "管理員取消");
+  assert.equal(first.stockRestoredQty, 2);
+  assert.equal(productRow[12], 7);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(pushes.length, 1);
+});
+
+test("取消售罄訂單會回補數量並重新上架；無限庫存仍保持空白", () => {
+  const finite = createHarness("待收訂金", {}, { productStock: 0 });
+  finite.productRow[7] = "下架";
+  finite.context.cancelOrder_("QK-TEST", "管理員取消");
+  assert.equal(finite.productRow[12], 2);
+  assert.equal(finite.productRow[7], "上架");
+
+  const unlimited = createHarness("待收訂金", {}, { productStock: "" });
+  unlimited.context.cancelOrder_("QK-TEST", "管理員取消");
+  assert.equal(unlimited.productRow[12], "");
+});
+
+test("取消狀態寫入失敗時會回滾已加回的庫存", () => {
+  const { context, row, productRow, pushes } = createHarness(
+    "待收訂金",
+    {},
+    { failOrderCancelWrite: true },
+  );
+  assert.throws(
+    () => context.cancelOrder_("QK-TEST", "管理員取消"),
+    /ORDER_CANCEL_WRITE_FAILED/,
+  );
+  assert.equal(row[15], "待收訂金");
+  assert.equal(productRow[12], 5);
+  assert.equal(pushes.length, 0);
 });
 
 test("未滿25小時不能提前使用逾期取消", () => {

@@ -11,7 +11,10 @@ const state = {
   selectedProduct: null,
   line: { idToken: "", userId: "", displayName: "" },
   myOrders: null,
+  pendingOrderRequest: null,
 };
+
+const PENDING_ORDER_REQUEST_KEY = "quokka-pending-order-request-v1";
 
 const demoProducts = [
   { id: "demo-1", name: "矮袋鼠造型鑰匙圈", category: "吊飾", imageUrl: "", priceTwd: 330, variants: ["QUOKKA", "BOBO"], description: "韓國現場預購示意商品", active: true, sortOrder: 1 },
@@ -354,8 +357,10 @@ async function submitOrder(event) {
       note: document.getElementById("note").value.trim(),
       items: state.cart.map((item) => ({ productId: item.productId, variant: item.variant, qty: item.qty })),
     };
+    payload.requestId = getOrCreateOrderRequestId(payload);
     const result = await apiPost(payload);
     if (!result.ok) throw new Error(result.error || "ORDER_FAILED");
+    clearPendingOrderRequest();
     state.cart = [];
     updateCart();
     document.getElementById("checkoutDialog").close();
@@ -374,6 +379,11 @@ async function submitOrder(event) {
       LINE_CONFIG_MISSING: "LINE 登入設定尚未完成，請聯絡管理員",
       INVALID_CUSTOMER: "請確認姓名與手機號碼皆已正確填寫",
       INVALID_ITEMS: "購物車內容有誤，請重新選擇商品",
+      INVALID_ORDER_REQUEST_ID: "訂單識別碼異常，請重新整理後再送出",
+      ORDER_REQUEST_CONFLICT: "這次送單識別碼發生衝突，請重新整理後再試",
+      OUT_OF_STOCK: "商品庫存不足，請重新整理商品後再送出",
+      LOCK_TIMEOUT: "目前同時下單人數較多，請稍候再按一次送出；系統會使用同一識別碼避免重複訂單",
+      ORDER_WRITE_FAILED: "訂單未完整寫入，系統已回滾；請稍候再按一次送出",
       SPREADSHEET_CONFIG_MISSING: "訂單系統尚未連接試算表，請聯絡管理員",
       SERVER_ERROR: "訂單系統暫時發生錯誤，請聯絡管理員",
     };
@@ -389,6 +399,46 @@ async function submitOrder(event) {
     button.disabled = false;
     button.textContent = "先送出預購訂單";
   }
+}
+
+function getOrCreateOrderRequestId(payload) {
+  const fingerprint = JSON.stringify({
+    customerName: payload.customerName,
+    phone: payload.phone,
+    note: payload.note,
+    items: payload.items,
+  });
+  let pending = state.pendingOrderRequest;
+  if (!pending) {
+    try { pending = JSON.parse(sessionStorage.getItem(PENDING_ORDER_REQUEST_KEY) || "null"); }
+    catch (error) { pending = null; }
+  }
+  if (
+    pending &&
+    pending.fingerprint === fingerprint &&
+    /^ORDER-\d{8}-\d{6}-[A-Z0-9]{8,32}$/.test(String(pending.requestId || ""))
+  ) {
+    state.pendingOrderRequest = pending;
+    return pending.requestId;
+  }
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const bytes = new Uint8Array(8);
+  if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  const random = Array.from(bytes, (value) => value.toString(36).toUpperCase().padStart(2, "0")).join("").slice(0, 16);
+  pending = { requestId: `ORDER-${stamp}-${random}`, fingerprint };
+  state.pendingOrderRequest = pending;
+  try { sessionStorage.setItem(PENDING_ORDER_REQUEST_KEY, JSON.stringify(pending)); }
+  catch (error) { console.warn("Unable to persist pending order request", error); }
+  return pending.requestId;
+}
+
+function clearPendingOrderRequest() {
+  state.pendingOrderRequest = null;
+  try { sessionStorage.removeItem(PENDING_ORDER_REQUEST_KEY); }
+  catch (error) { console.warn("Unable to clear pending order request", error); }
 }
 
 function updateSaleClosedState() {
