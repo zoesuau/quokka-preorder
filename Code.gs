@@ -6,6 +6,8 @@
  * LINE_MESSAGING_ACCESS_TOKEN  Messaging API 長效權杖
  * ADMIN_LINE_USER_IDS   可使用後台的 LINE User ID，多個以逗號分隔
  * SPREADSHEET_ID        選填；綁定試算表時可不填
+ * ORDER_FLOW_MODE       選填；seven_eleven_full 啟用 7-11 全額付款，未填維持 mall_deposit
+ * SHIPPING_FEE_TWD      選填；7-11 模式每張訂單運費，預設 60
  */
 
 var PRODUCT_HEADERS_ = [
@@ -66,6 +68,12 @@ var ORDER_HEADERS_ = [
   "paymentAutoCancelAt",
   "iopenMallPaymentDays",
   "iopenMallPaymentDeadlineAt",
+  "orderFlowMode",
+  "recipientName",
+  "pickupStoreCode",
+  "pickupStoreName",
+  "shippingFee",
+  "orderTotal",
 ];
 
 var ORDER_EXPORT_HEADERS_ = [
@@ -109,6 +117,12 @@ var ORDER_EXPORT_HEADERS_ = [
   "系統自動取消時間",
   "賣場付款期限天數",
   "賣場付款期限",
+  "訂單流程模式",
+  "取件人真實姓名",
+  "7-11 店號",
+  "7-11 店名",
+  "運費",
+  "訂單總額（含運）",
 ];
 
 var CUSTOMER_EXPORT_HEADERS_ = [
@@ -195,6 +209,12 @@ var ORDER_STATUS_SHIPPED_ = "已開設 iOPEN Mall 賣場";
 var ORDER_STATUS_SHIPPED_LEGACY_ = "已出貨";
 var ORDER_STATUS_COMPLETED_ = "訂單已完成";
 var ORDER_STATUS_CANCELLED_ = "已取消";
+var ORDER_STATUS_FULL_PAYMENT_PENDING_ = "待收全款";
+var ORDER_STATUS_FULL_PAYMENT_RECEIVED_ = "已收到全款";
+var ORDER_STATUS_AWAITING_SHIPMENT_ = "待寄出";
+var ORDER_STATUS_STORE_SHIPPED_ = "已寄出";
+var ORDER_FLOW_MALL_DEPOSIT_ = "mall_deposit";
+var ORDER_FLOW_SEVEN_ELEVEN_FULL_ = "seven_eleven_full";
 var ORDER_REMINDER_HOURS_ = 12;
 var ORDER_EXPIRES_DISPLAY_HOURS_ = 24;
 var ORDER_AUTO_CANCEL_HOURS_ = 25;
@@ -234,6 +254,10 @@ var DEFAULT_SETTINGS_ = {
   bankAccountName: "",
   bankQrUrl: "",
   iopenMallUrl: "https://mall.iopenmall.tw/112415/",
+  orderFlowMode: ORDER_FLOW_MALL_DEPOSIT_,
+  shippingFeeTwd: 60,
+  paymentAutoCancelEnabled: true,
+  saleClosesAt: "",
 };
 var PRODUCT_IMAGE_FOLDER_ = "quokka-preorder-product-images";
 
@@ -371,6 +395,7 @@ function handleReadPublicCatalog_() {
     if (cached) return json_(cached);
 
     var settings = readSettings_();
+    var saleClosed = isSaleClosed_(settings, new Date());
     var products = readProducts_(settings).filter(function (product) {
       return product.active === true;
     });
@@ -379,9 +404,12 @@ function handleReadPublicCatalog_() {
       products: products,
       settings: {
         preorderNotice: settings.preorderNotice,
-        saleClosed: settings.saleClosed,
+        saleClosed: saleClosed,
         saleClosedNotice: settings.saleClosedNotice,
         depositPercent: settings.depositPercent,
+        orderFlowMode: settings.orderFlowMode,
+        shippingFeeTwd: settings.shippingFeeTwd,
+        paymentDeadlineHours: settings.paymentDeadlineHours,
       },
     };
     writePublicCatalogCache_(payload);
@@ -572,7 +600,10 @@ function handleCreateFormalSimulationPreorder_(data) {
       idToken: "TEST_MODE_NO_LINE_TOKEN",
       lineDisplayName: cleanText_(data.lineDisplayName, 80),
       customerName: cleanText_(data.customerName, 30),
+      recipientName: cleanText_(data.recipientName, 30),
       phone: cleanText_(data.phone, 20),
+      pickupStoreCode: cleanText_(data.pickupStoreCode, 20),
+      pickupStoreName: cleanText_(data.pickupStoreName, 80),
       note: cleanText_(data.note, 300),
       items: data.items,
       testMode: true,
@@ -1157,11 +1188,11 @@ function stressSnapshotsEqual_(before, after) {
 
 function handleCreatePreorder_(data) {
   var profile = verifyLineIdToken_(data.idToken);
-  validatePreorderFields_(data);
   validateOrderRequestId_(data.requestId);
   setupQuokkaPreorder();
   var settings = readSettings_();
-  if (settings.saleClosed) throw new Error("SALE_CLOSED");
+  validatePreorderFields_(data, settings);
+  if (isSaleClosed_(settings, new Date())) throw new Error("SALE_CLOSED");
 
   // 一般商品與金額檢查先在鎖外完成；取得鎖後仍會重新讀取商品列與庫存。
   prepareOrderItems_(data.items, readProducts_(settings));
@@ -1205,15 +1236,17 @@ function handleCreatePreorder_(data) {
       );
       orderResult.duplicate = true;
     } else {
-      if (readSaleClosedFlag_()) throw new Error("SALE_CLOSED");
+      if (isSaleClosed_(readSettings_(), new Date()))
+        throw new Error("SALE_CLOSED");
       var reservation = prepareInventoryReservation_(data.items, settings);
       var cleanItems = reservation.cleanItems;
       var totalQty = reservation.totalQty;
       var estimatedTotal = reservation.estimatedTotal;
-      var depositTotal = Math.ceil(
-        estimatedTotal * (settings.depositPercent / 100),
-      );
-      var estimatedBalance = estimatedTotal - depositTotal;
+      var paymentTotals = calculateOrderPaymentTotals_(estimatedTotal, settings);
+      var shippingFee = paymentTotals.shippingFee;
+      var orderTotal = paymentTotals.orderTotal;
+      var depositTotal = paymentTotals.depositTotal;
+      var estimatedBalance = paymentTotals.estimatedBalance;
       var now = new Date();
       var orderNo = createOrderNo_(now);
       var itemsSummary = summarizeOrderItems_(cleanItems);
@@ -1229,6 +1262,8 @@ function handleCreatePreorder_(data) {
         estimatedTotal,
         depositTotal,
         estimatedBalance,
+        shippingFee,
+        orderTotal,
       );
       var appliedUpdates = [];
       var appendedOrderRow = 0;
@@ -1280,7 +1315,15 @@ function handleCreatePreorder_(data) {
         estimatedTotal: estimatedTotal,
         depositTotal: depositTotal,
         estimatedBalance: estimatedBalance,
-        depositPercent: settings.depositPercent,
+        shippingFee: shippingFee,
+        orderTotal: orderTotal,
+        orderFlowMode: settings.orderFlowMode,
+        recipientName: cleanText_(data.recipientName || data.customerName, 30),
+        pickupStoreCode: cleanText_(data.pickupStoreCode, 20),
+        pickupStoreName: cleanText_(data.pickupStoreName, 80),
+        depositPercent: isSevenElevenFullMode_(settings.orderFlowMode)
+          ? 100
+          : settings.depositPercent,
         paymentDeadlineAt: formatDateTime_(
           new Date(now.getTime() + settings.paymentDeadlineHours * 3600000),
         ),
@@ -1299,6 +1342,8 @@ function handleCreatePreorder_(data) {
       estimatedTotal: orderResult.estimatedTotal,
       depositTotal: orderResult.depositTotal,
       estimatedBalance: orderResult.estimatedBalance,
+      shippingFee: orderResult.shippingFee,
+      orderTotal: orderResult.orderTotal,
       botMessageSent: false,
     });
   var botMessageSent = pushOrderSuccessCard_(profile.sub, orderResult);
@@ -1309,6 +1354,8 @@ function handleCreatePreorder_(data) {
     estimatedTotal: orderResult.estimatedTotal,
     depositTotal: orderResult.depositTotal,
     estimatedBalance: orderResult.estimatedBalance,
+    shippingFee: orderResult.shippingFee,
+    orderTotal: orderResult.orderTotal,
     botMessageSent: botMessageSent,
   });
 }
@@ -1317,6 +1364,30 @@ function validateOrderRequestId_(requestId) {
   var value = String(requestId || "").trim();
   if (!/^ORDER-\d{8}-\d{6}-[A-Z0-9]{8,32}$/.test(value))
     throw new Error("INVALID_ORDER_REQUEST_ID");
+}
+
+function calculateOrderPaymentTotals_(productSubtotal, settings) {
+  var subtotal = Math.max(0, number_(productSubtotal));
+  var sevenElevenFull = isSevenElevenFullMode_(settings && settings.orderFlowMode);
+  var shippingFee = sevenElevenFull
+    ? Math.max(0, number_(settings.shippingFeeTwd))
+    : 0;
+  var orderTotal = subtotal + shippingFee;
+  var depositTotal = sevenElevenFull
+    ? orderTotal
+    : Math.ceil(
+        subtotal *
+          (number_(settings && settings.depositPercent) /
+            100),
+      );
+  return {
+    shippingFee: shippingFee,
+    orderTotal: orderTotal,
+    depositTotal: depositTotal,
+    estimatedBalance: sevenElevenFull
+      ? 0
+      : Math.max(subtotal - depositTotal, 0),
+  };
 }
 
 function orderRequestPayloadDigest_(data) {
@@ -1330,7 +1401,10 @@ function orderRequestPayloadDigest_(data) {
   return sha256_(
     JSON.stringify({
       customerName: cleanText_(data.customerName, 30),
+      recipientName: cleanText_(data.recipientName, 30),
       phone: cleanText_(data.phone, 20),
+      pickupStoreCode: cleanText_(data.pickupStoreCode, 20),
+      pickupStoreName: cleanText_(data.pickupStoreName, 80),
       note: cleanText_(data.note, 300),
       items: items,
     }),
@@ -1462,13 +1536,16 @@ function buildNewOrderRow_(
   estimatedTotal,
   depositTotal,
   estimatedBalance,
+  shippingFee,
+  orderTotal,
 ) {
+  var sevenElevenFull = isSevenElevenFullMode_(settings.orderFlowMode);
   return [
     orderNo,
     formatDateTime_(now),
     profile.sub,
     String(data.lineDisplayName || profile.name || "").trim().slice(0, 80),
-    cleanText_(data.customerName, 30),
+    cleanText_(data.recipientName || data.customerName, 30),
     cleanText_(data.phone, 20),
     JSON.stringify(cleanItems),
     itemsSummary,
@@ -1479,13 +1556,11 @@ function buildNewOrderRow_(
     "",
     "",
     cleanText_(data.note, 300),
-    ORDER_STATUS_PENDING_,
+    sevenElevenFull
+      ? ORDER_STATUS_FULL_PAYMENT_PENDING_
+      : ORDER_STATUS_PENDING_,
     "",
-    "未開設賣場",
-    "",
-    "",
-    "",
-    "",
+    sevenElevenFull ? "待寄出" : "未開設賣場",
     "",
     "",
     "",
@@ -1498,7 +1573,11 @@ function buildNewOrderRow_(
     "",
     "",
     "",
-    settings.depositPercent,
+    "",
+    "",
+    "",
+    "",
+    sevenElevenFull ? 100 : settings.depositPercent,
     formatDateTime_(
       new Date(now.getTime() + settings.paymentReminderHours * 3600000),
     ),
@@ -1514,6 +1593,12 @@ function buildNewOrderRow_(
     ),
     "",
     "",
+    settings.orderFlowMode,
+    cleanText_(data.recipientName || data.customerName, 30),
+    cleanText_(data.pickupStoreCode, 20),
+    cleanText_(data.pickupStoreName, 80),
+    shippingFee,
+    orderTotal,
   ];
 }
 
@@ -1528,6 +1613,12 @@ function orderResultFromRow_(row) {
     estimatedTotal: number_(row[9]),
     depositTotal: number_(row[10]),
     estimatedBalance: number_(row[11]),
+    shippingFee: number_(row[44]),
+    orderTotal: number_(row[45]) || number_(row[9]),
+    orderFlowMode: orderFlowModeFromRow_(row),
+    recipientName: row[41] || row[4],
+    pickupStoreCode: row[42],
+    pickupStoreName: row[43],
     depositPercent: number_(row[34]),
     paymentDeadlineAt: row[36],
   };
@@ -1639,7 +1730,7 @@ function readPendingOrderNosByUser_() {
     .getDisplayValues();
   rows.forEach(function (row) {
     var status = normalizeOrderStatus_(row[15], row[17]);
-    if (status !== ORDER_STATUS_PENDING_) return;
+    if (!isPaymentPendingStatus_(status)) return;
     var userId = String(row[2] || "").trim();
     if (!userId) return;
     if (!result[userId]) result[userId] = [];
@@ -1838,11 +1929,43 @@ function buildUnifiedOrderCard_(order, title, message, options) {
       color: options.separatorColor || "#C8D8DF",
     },
   ];
+  if (isSevenElevenFullMode_(order.orderFlowMode)) {
+    body.splice(
+      4,
+      0,
+      themedMoneyRow_("取件人", order.recipientName || order.customerName || "—"),
+      themedMoneyRow_(
+        "取件門市",
+        [order.pickupStoreCode, order.pickupStoreName].filter(Boolean).join(" ") || "—",
+      ),
+    );
+  }
   if (Array.isArray(options.moneyRows)) {
     options.moneyRows.forEach(function (row) {
       body.push(themedMoneyRow_(row.label, row.value, row.color));
     });
   } else {
+    if (isSevenElevenFullMode_(order.orderFlowMode)) {
+      body.push(
+        themedMoneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
+      );
+      body.push(
+        themedMoneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
+      );
+      body.push(
+        themedMoneyRow_("7-11 運費", "NT$" + formatMoney_(order.shippingFee)),
+      );
+      body.push(
+        themedMoneyRow_(
+          options.depositLabel || "應付全款",
+          "NT$" + formatMoney_(order.orderTotal || order.depositTotal),
+          options.depositValueColor || "#EF0025",
+        ),
+      );
+      (options.extraRows || []).forEach(function (row) {
+        body.push(themedMoneyRow_(row.label, row.value, row.color));
+      });
+    } else {
     if (order.totalQty !== undefined)
       body.push(
         themedMoneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
@@ -1869,6 +1992,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
     (options.extraRows || []).forEach(function (row) {
       body.push(themedMoneyRow_(row.label, row.value, row.color));
     });
+    }
   }
 
   var card = {
@@ -1948,6 +2072,7 @@ function buildUnifiedOrderSuccessCard_(order) {
       paymentDue.getTime() + ORDER_PAYMENT_DEADLINE_HOURS_ * 3600000,
     );
   var transferRequestText = "您好，我想索取匯款資訊";
+  var sevenElevenFull = isSevenElevenFullMode_(order.orderFlowMode);
   return buildUnifiedOrderCard_(
     order,
     "已收到預購訂單",
@@ -1955,10 +2080,11 @@ function buildUnifiedOrderSuccessCard_(order) {
       (paymentDue ? formatDateTime_(paymentDue) : "正式付款期限") +
       " 前完成匯款並回傳帳號後五碼。",
     {
-      depositLabel:
-        "本次訂金（" +
-        number_(order.depositPercent || DEFAULT_SETTINGS_.depositPercent) +
-        "%）",
+      depositLabel: sevenElevenFull
+        ? "本次應付全款"
+        : "本次訂金（" +
+          number_(order.depositPercent || DEFAULT_SETTINGS_.depositPercent) +
+          "%）",
       balanceLabel: "回國後剩餘商品款",
       buttons: [
         {
@@ -1982,24 +2108,45 @@ function buildUnifiedPendingCard_(order) {
     : null;
   return buildUnifiedOrderCard_(
     order,
-    "待收訂金",
+    isSevenElevenFullMode_(order.orderFlowMode) ? "待收全款" : "待收訂金",
     "請於 " +
       (dueAt ? formatDateTime_(dueAt) : "正式付款期限") +
       " 前完成匯款並回傳帳號後五碼。",
-    { depositLabel: "應付訂金", balanceLabel: "回國後剩餘商品款" },
+    {
+      depositLabel: isSevenElevenFullMode_(order.orderFlowMode)
+        ? "應付全款"
+        : "應付訂金",
+      balanceLabel: "回國後剩餘商品款",
+    },
   );
 }
 
 function buildUnifiedDepositReceivedCard_(order) {
+  var sevenElevenFull = isSevenElevenFullMode_(order.orderFlowMode);
   return buildUnifiedOrderCard_(
     order,
-    "已收到訂金",
-    "訂金已確認入帳，您的預訂已完成。",
+    sevenElevenFull ? "已收到全款" : "已收到訂金",
+    sevenElevenFull
+      ? "全款已確認入帳，訂單將準備採買與寄出。"
+      : "訂金已確認入帳，您的預訂已完成。",
     {
-      depositLabel: "已收訂金",
+      depositLabel: sevenElevenFull ? "已收全款" : "已收訂金",
       balanceLabel: "回國後剩餘商品款",
       messageBackgroundColor: "#FFF0B8",
       messageColor: "#805B00",
+    },
+  );
+}
+
+function buildUnifiedStoreShippedCard_(order) {
+  return buildUnifiedOrderCard_(
+    order,
+    "訂單已寄出",
+    "商品已使用 7-11 店到店寄出，請留意到店取貨通知。",
+    {
+      depositLabel: "已付全款",
+      messageBackgroundColor: "#E8F4EC",
+      messageColor: "#2F6D46",
     },
   );
 }
@@ -2033,11 +2180,12 @@ function buildUnifiedMallReadyCard_(order, iopenMallUrl) {
 }
 
 function buildUnifiedReminderCard_(order, message, title, iopenMallUrl) {
+  var sevenElevenFull = isSevenElevenFullMode_(order.orderFlowMode);
   return buildUnifiedOrderCard_(order, title, message, {
     warning: true,
     messageBackgroundColor: "#FBE6EA",
     messageColor: "#C13E4D",
-    depositLabel: "應付訂金",
+    depositLabel: sevenElevenFull ? "應付全款" : "應付訂金",
     balanceLabel:
       title === "iOPEN Mall 付款提醒" ? "賣場應付金額" : "後續應付",
     primaryButtonColor:
@@ -2056,13 +2204,14 @@ function buildUnifiedReminderCard_(order, message, title, iopenMallUrl) {
 }
 
 function buildUnifiedCancellationCard_(order) {
+  var sevenElevenFull = isSevenElevenFullMode_(order.orderFlowMode);
   return buildUnifiedOrderCard_(
     order,
     "預購訂單已取消",
     String(order.reason || "訂單已由管理員取消。"),
     {
       warning: true,
-      depositLabel: "原訂金",
+      depositLabel: sevenElevenFull ? "原訂單全款" : "原訂金",
       balanceLabel: "原後續應付",
       headerBackgroundColor: "#7C858A",
       bodyBackgroundColor: "#F5F6F6",
@@ -2079,6 +2228,39 @@ function buildUnifiedCancellationCard_(order) {
 }
 
 function buildAdjustmentMoneyRows_(order) {
+  if (isSevenElevenFullMode_(order.orderFlowMode)) {
+    var fullRows = [
+      {
+        label: "原訂單總額",
+        value: "NT$" + formatMoney_(order.originalOrderTotal),
+      },
+      {
+        label: "已收全款",
+        value: "NT$" + formatMoney_(order.receivedDeposit),
+        color: "#EF0025",
+      },
+      { label: "商品件數", value: formatMoney_(order.totalQty) + " 件" },
+      {
+        label: "調整後商品總額",
+        value: "NT$" + formatMoney_(order.adjustedTotal),
+      },
+      {
+        label: "7-11 運費",
+        value: "NT$" + formatMoney_(order.adjustedShippingFee),
+      },
+      {
+        label: "調整後訂單總額",
+        value: "NT$" + formatMoney_(order.adjustedOrderTotal),
+      },
+    ];
+    if (number_(order.cashRefundDue) > 0)
+      fullRows.push({
+        label: "待退款",
+        value: "NT$" + formatMoney_(order.cashRefundDue),
+        color: "#EF0025",
+      });
+    return fullRows;
+  }
   var receivedDeposit = number_(order.receivedDeposit);
   var adjustedTotal = number_(order.adjustedTotal);
   var adjustedOrderDeposit = Math.ceil(
@@ -2329,6 +2511,13 @@ function handleReadMyPreorders_(data) {
       depositTotal: number_(row[10]),
       depositPercent: number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
       estimatedBalance: number_(row[11]),
+      orderFlowMode: orderFlowModeFromRow_(row),
+      recipientName: row[41] || row[4],
+      phone: row[5],
+      pickupStoreCode: row[42],
+      pickupStoreName: row[43],
+      shippingFee: number_(row[44]),
+      orderTotal: number_(row[45]) || number_(row[9]),
       originalEstimatedTotal: number_(row[23]) || number_(row[9]),
       shortageAdjustedAt: row[25],
       cashRefundDue: number_(row[26]),
@@ -2446,7 +2635,7 @@ function buildCustomerExportRows_(orderRows) {
     if (isCancelled) customer.cancelledOrderCount += 1;
     else {
       customer.activeOrderCount += 1;
-      customer.activeOrderTotal += number_(row[9]);
+      customer.activeOrderTotal += number_(row[45]) || number_(row[9]);
     }
     if (status === ORDER_STATUS_COMPLETED_) customer.completedOrderCount += 1;
     if (createdAtValue < customer.firstOrderValue) {
@@ -2511,6 +2700,7 @@ function readAdminOrders_() {
     .getRange(2, 1, sheet.getLastRow() - 1, ORDER_HEADERS_.length)
     .getDisplayValues();
   var now = new Date();
+  var settings = readSettings_();
   var lineAlertsByUser = readUnreviewedLineAlertsByUser_();
   return rows
     .filter(function (row) {
@@ -2532,7 +2722,7 @@ function readAdminOrders_() {
           ? buildMallPaymentDeadline_(row[18], row[39], number_(row[38]))
           : null;
       var lineAlerts =
-        status === ORDER_STATUS_PENDING_
+        isPaymentPendingStatus_(status)
           ? (lineAlertsByUser[String(row[2] || "").trim()] || []).filter(
               function (alert) {
                 return (
@@ -2550,6 +2740,12 @@ function readAdminOrders_() {
         lineDisplayName: row[3],
         customerName: row[4],
         phone: row[5],
+        orderFlowMode: orderFlowModeFromRow_(row),
+        recipientName: row[41] || row[4],
+        pickupStoreCode: row[42],
+        pickupStoreName: row[43],
+        shippingFee: number_(row[44]),
+        orderTotal: number_(row[45]) || number_(row[9]),
         items: Array.isArray(items) ? items : [],
         itemsSummary: row[7],
         totalQty: number_(row[8]),
@@ -2564,11 +2760,7 @@ function readAdminOrders_() {
         note: row[14],
         status: status,
         socialProfileId: row[16],
-        shippingStatus:
-          status === ORDER_STATUS_SHIPPED_ ||
-          status === ORDER_STATUS_COMPLETED_
-            ? "已開設賣場"
-            : "未開設賣場",
+        shippingStatus: row[17],
         shippedAt: row[18],
         reminderSentAt: row[19],
         cancelledAt: row[20],
@@ -2592,11 +2784,12 @@ function readAdminOrders_() {
           ? formatDateTime_(paymentSchedule.dueAt)
           : "",
         paymentOverdue:
-          status === ORDER_STATUS_PENDING_ &&
+          isPaymentPendingStatus_(status) &&
           !!paymentSchedule &&
           now.getTime() >= paymentSchedule.dueAt.getTime(),
         autoCancelOverdue:
-          status === ORDER_STATUS_PENDING_ &&
+          settings.paymentAutoCancelEnabled &&
+          isPaymentPendingStatus_(status) &&
           !!paymentSchedule &&
           now.getTime() >= paymentSchedule.autoCancelAt.getTime(),
         lineAlertCount: lineAlerts.length,
@@ -2608,12 +2801,14 @@ function readAdminOrders_() {
             }
           : null,
         reminderDue:
-          status === ORDER_STATUS_PENDING_ &&
+          isPaymentPendingStatus_(status) &&
           !!paymentSchedule &&
           now.getTime() >= paymentSchedule.reminderAt.getTime() &&
           now.getTime() < paymentSchedule.dueAt.getTime() &&
           !String(row[19] || "").trim(),
-        reminderMessage: expiresAt ? buildOrderReminderText_(expiresAt) : "",
+        reminderMessage: expiresAt
+          ? buildOrderReminderText_(expiresAt, orderFlowModeFromRow_(row))
+          : "",
         mallReminderDue:
           !!mallDeadline &&
           mallDeadline.reminderDue &&
@@ -2678,6 +2873,10 @@ function handleAdminResolveLineAlert_(data) {
       .getRange(orderRow, 1, 1, ORDER_HEADERS_.length)
       .getDisplayValues()[0];
     var currentStatus = normalizeOrderStatus_(order[15], order[17]);
+    var sevenElevenFull = isSevenElevenFullMode_(orderFlowModeFromRow_(order));
+    var receivedStatus = sevenElevenFull
+      ? ORDER_STATUS_FULL_PAYMENT_RECEIVED_
+      : ORDER_STATUS_DEPOSIT_RECEIVED_;
     var userId = String(order[2] || "").trim();
     var createdAt = parseOrderDate_(order[1]);
     var paymentSchedule = getOrderPaymentSchedule_(order);
@@ -2702,7 +2901,7 @@ function handleAdminResolveLineAlert_(data) {
     var duplicate = false;
     var targetAlreadyApplied =
       (decision === "received" &&
-        currentStatus === ORDER_STATUS_DEPOSIT_RECEIVED_) ||
+        currentStatus === receivedStatus) ||
       (decision === "cancel_overdue" &&
         currentStatus === ORDER_STATUS_CANCELLED_);
     if (!eventIndexes.length) {
@@ -2711,32 +2910,32 @@ function handleAdminResolveLineAlert_(data) {
     }
     if (decision === "received") {
       if (
-        [
-          ORDER_STATUS_PENDING_,
-          ORDER_STATUS_PAYMENT_REPORTED_,
-          ORDER_STATUS_DEPOSIT_RECEIVED_,
-        ].indexOf(currentStatus) < 0
+        (sevenElevenFull
+          ? [ORDER_STATUS_FULL_PAYMENT_PENDING_, ORDER_STATUS_FULL_PAYMENT_RECEIVED_]
+          : [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_, ORDER_STATUS_DEPOSIT_RECEIVED_]
+        ).indexOf(currentStatus) < 0
       )
         throw new Error("INVALID_ORDER_STATUS");
-      duplicate = currentStatus === ORDER_STATUS_DEPOSIT_RECEIVED_;
+      duplicate = currentStatus === receivedStatus;
       if (!duplicate) {
         orderSheet
           .getRange(orderRow, 16)
-          .setValue(ORDER_STATUS_DEPOSIT_RECEIVED_);
+          .setValue(receivedStatus);
         orderSheet
           .getRange(orderRow, 18, 1, 2)
-          .setValues([["未開設賣場", ""]]);
+          .setValues([[sevenElevenFull ? "待寄出" : "未開設賣場", ""]]);
         notificationType = "received";
       }
     } else if (decision === "reviewed") {
       if (
-        [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
-          currentStatus,
-        ) < 0
+        (sevenElevenFull
+          ? [ORDER_STATUS_FULL_PAYMENT_PENDING_]
+          : [ORDER_STATUS_PENDING_, ORDER_STATUS_PAYMENT_REPORTED_]
+        ).indexOf(currentStatus) < 0
       )
         throw new Error("INVALID_ORDER_STATUS");
       if (
-        currentStatus === ORDER_STATUS_PENDING_ &&
+        isPaymentPendingStatus_(currentStatus) &&
         paymentSchedule &&
         new Date().getTime() >= paymentSchedule.autoCancelAt.getTime()
       )
@@ -2745,7 +2944,7 @@ function handleAdminResolveLineAlert_(data) {
       if (currentStatus === ORDER_STATUS_CANCELLED_) {
         duplicate = true;
       } else {
-        if (currentStatus !== ORDER_STATUS_PENDING_)
+        if (!isPaymentPendingStatus_(currentStatus))
           throw new Error("INVALID_ORDER_STATUS");
         if (
           !paymentSchedule ||
@@ -2766,14 +2965,14 @@ function handleAdminResolveLineAlert_(data) {
     });
     var nextStatus =
       decision === "received"
-        ? ORDER_STATUS_DEPOSIT_RECEIVED_
+        ? receivedStatus
         : decision === "cancel_overdue"
           ? ORDER_STATUS_CANCELLED_
           : currentStatus;
     result = {
       orderNo: orderNo,
       status: nextStatus,
-      shippingStatus: "未開設賣場",
+      shippingStatus: sevenElevenFull ? "待寄出" : "未開設賣場",
       shippedAt: "",
       cancelledAt:
         nextStatus === ORDER_STATUS_CANCELLED_
@@ -2796,7 +2995,15 @@ function handleAdminResolveLineAlert_(data) {
       estimatedTotal: number_(order[9]),
       depositTotal: number_(order[10]),
       estimatedBalance: number_(order[11]),
-      reason: "超過訂金付款期限仍未確認收到訂金。",
+      orderFlowMode: orderFlowModeFromRow_(order),
+      shippingFee: number_(order[44]),
+      orderTotal: number_(order[45]) || number_(order[9]),
+      recipientName: order[41] || order[4],
+      pickupStoreCode: order[42],
+      pickupStoreName: order[43],
+      reason: sevenElevenFull
+        ? "超過全款付款期限仍未確認收到款項。"
+        : "超過訂金付款期限仍未確認收到訂金。",
     };
   } finally {
     lock.releaseLock();
@@ -2833,6 +3040,10 @@ function handleAdminUpdateOrderStatus_(data) {
     ORDER_STATUS_DEPOSIT_RECEIVED_,
     ORDER_STATUS_SHIPPED_,
     ORDER_STATUS_COMPLETED_,
+    ORDER_STATUS_FULL_PAYMENT_PENDING_,
+    ORDER_STATUS_FULL_PAYMENT_RECEIVED_,
+    ORDER_STATUS_AWAITING_SHIPMENT_,
+    ORDER_STATUS_STORE_SHIPPED_,
   ];
   if (!orderNo || allowed.indexOf(status) < 0)
     throw new Error("INVALID_ORDER_STATUS");
@@ -2853,14 +3064,43 @@ function handleAdminUpdateOrderStatus_(data) {
       var row = sheet
         .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
         .getDisplayValues()[0];
+      var sevenElevenFull = isSevenElevenFullMode_(orderFlowModeFromRow_(row));
+      var allowedForOrder = sevenElevenFull
+        ? [
+            ORDER_STATUS_FULL_PAYMENT_PENDING_,
+            ORDER_STATUS_FULL_PAYMENT_RECEIVED_,
+            ORDER_STATUS_AWAITING_SHIPMENT_,
+            ORDER_STATUS_STORE_SHIPPED_,
+            ORDER_STATUS_COMPLETED_,
+          ]
+        : [
+            ORDER_STATUS_PENDING_,
+            ORDER_STATUS_PAYMENT_REPORTED_,
+            ORDER_STATUS_DEPOSIT_RECEIVED_,
+            ORDER_STATUS_SHIPPED_,
+            ORDER_STATUS_COMPLETED_,
+          ];
+      if (allowedForOrder.indexOf(status) < 0)
+        throw new Error("INVALID_ORDER_STATUS");
       previousStatus = normalizeOrderStatus_(row[15], row[17]);
-      var shippingStatus =
-        status === ORDER_STATUS_SHIPPED_ ||
-        status === ORDER_STATUS_COMPLETED_
+      var shippingStatus = sevenElevenFull
+        ? status === ORDER_STATUS_STORE_SHIPPED_ ||
+          status === ORDER_STATUS_COMPLETED_
+          ? "已寄出"
+          : "待寄出"
+        : status === ORDER_STATUS_SHIPPED_ ||
+            status === ORDER_STATUS_COMPLETED_
           ? "已開設賣場"
           : "未開設賣場";
-      var shippedAt =
-        status === ORDER_STATUS_SHIPPED_
+      var shippedAt = sevenElevenFull
+        ? status === ORDER_STATUS_STORE_SHIPPED_
+          ? previousStatus === ORDER_STATUS_STORE_SHIPPED_ && row[18]
+            ? row[18]
+            : formatDateTime_(new Date())
+          : status === ORDER_STATUS_COMPLETED_
+            ? row[18]
+            : ""
+        : status === ORDER_STATUS_SHIPPED_
           ? previousStatus === ORDER_STATUS_SHIPPED_ && row[18]
             ? row[18]
             : formatDateTime_(new Date())
@@ -2870,6 +3110,7 @@ function handleAdminUpdateOrderStatus_(data) {
       var mallPaymentDays = number_(row[38]);
       var mallPaymentDeadlineAt = row[39];
       if (
+        !sevenElevenFull &&
         status === ORDER_STATUS_SHIPPED_ &&
         previousStatus !== ORDER_STATUS_SHIPPED_
       ) {
@@ -2883,7 +3124,7 @@ function handleAdminUpdateOrderStatus_(data) {
       sheet
         .getRange(rowNumber, 18, 1, 2)
         .setValues([[shippingStatus, shippedAt]]);
-      if (status === ORDER_STATUS_SHIPPED_)
+      if (!sevenElevenFull && status === ORDER_STATUS_SHIPPED_)
         sheet
           .getRange(rowNumber, 39, 1, 2)
           .setValues([[mallPaymentDays, mallPaymentDeadlineAt]]);
@@ -2908,6 +3149,12 @@ function handleAdminUpdateOrderStatus_(data) {
         depositPercent:
           number_(row[34]) || DEFAULT_SETTINGS_.depositPercent,
         estimatedBalance: number_(row[11]),
+        orderFlowMode: orderFlowModeFromRow_(row),
+        recipientName: row[41] || row[4],
+        pickupStoreCode: row[42],
+        pickupStoreName: row[43],
+        shippingFee: number_(row[44]),
+        orderTotal: number_(row[45]) || number_(row[9]),
         paymentDeadlineAt: row[36],
         shippedAt: shippedAt,
         iopenMallPaymentDays: mallPaymentDays,
@@ -2922,18 +3169,29 @@ function handleAdminUpdateOrderStatus_(data) {
 
   var shouldNotify =
     previousStatus !== status &&
-    [ORDER_STATUS_COMPLETED_, ORDER_STATUS_PAYMENT_REPORTED_].indexOf(
-      status,
-    ) < 0;
+    [
+      ORDER_STATUS_PENDING_,
+      ORDER_STATUS_FULL_PAYMENT_PENDING_,
+      ORDER_STATUS_DEPOSIT_RECEIVED_,
+      ORDER_STATUS_FULL_PAYMENT_RECEIVED_,
+      ORDER_STATUS_SHIPPED_,
+      ORDER_STATUS_STORE_SHIPPED_,
+    ].indexOf(status) >= 0;
   var notificationSent = false;
-  if (shouldNotify && status === ORDER_STATUS_PENDING_) {
+  if (
+    shouldNotify &&
+    [ORDER_STATUS_PENDING_, ORDER_STATUS_FULL_PAYMENT_PENDING_].indexOf(status) >= 0
+  ) {
     notificationSent = pushLineMessage_(
       notificationTarget.lineUserId,
       buildUnifiedPendingCard_(notificationTarget),
       "pending deposit " + orderNo,
     );
   }
-  if (shouldNotify && status === ORDER_STATUS_DEPOSIT_RECEIVED_) {
+  if (
+    shouldNotify &&
+    [ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_FULL_PAYMENT_RECEIVED_].indexOf(status) >= 0
+  ) {
     notificationSent = pushLineMessage_(
       notificationTarget.lineUserId,
       buildUnifiedDepositReceivedCard_(notificationTarget),
@@ -2947,6 +3205,13 @@ function handleAdminUpdateOrderStatus_(data) {
       notificationTarget.lineUserId,
       buildUnifiedMallReadyCard_(notificationTarget, iopenMallUrl),
       "iopen mall ready " + orderNo,
+    );
+  }
+  if (shouldNotify && status === ORDER_STATUS_STORE_SHIPPED_) {
+    notificationSent = pushLineMessage_(
+      notificationTarget.lineUserId,
+      buildUnifiedStoreShippedCard_(notificationTarget),
+      "seven eleven shipped " + orderNo,
     );
   }
   orderResult.notificationAttempted = shouldNotify;
@@ -3493,10 +3758,12 @@ function handleAdminAdjustOrderShortage_(data) {
       });
     }
     var currentStatus = normalizeOrderStatus_(row[15], row[17]);
+    var sevenElevenFull = isSevenElevenFullMode_(orderFlowModeFromRow_(row));
     if (
-      [ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_SHIPPED_].indexOf(
-        currentStatus,
-      ) < 0
+      (sevenElevenFull
+        ? [ORDER_STATUS_FULL_PAYMENT_RECEIVED_, ORDER_STATUS_AWAITING_SHIPMENT_]
+        : [ORDER_STATUS_DEPOSIT_RECEIVED_, ORDER_STATUS_SHIPPED_]
+      ).indexOf(currentStatus) < 0
     )
       throw new Error("SHORTAGE_REQUIRES_DEPOSIT");
     if (expectedStatus !== currentStatus) throw new Error("ORDER_CHANGED");
@@ -3566,8 +3833,15 @@ function handleAdminAdjustOrderShortage_(data) {
       return sum + number_(item.subtotalTwd);
     }, 0);
     var depositTotal = number_(row[10]);
-    var adjustedBalance = Math.max(adjustedTotal - depositTotal, 0);
-    var cashRefundDue = Math.max(depositTotal - adjustedTotal, 0);
+    var adjustedShippingFee =
+      sevenElevenFull && remainingItems.length ? number_(row[44]) : 0;
+    var adjustedOrderTotal = adjustedTotal + adjustedShippingFee;
+    var adjustedBalance = sevenElevenFull
+      ? 0
+      : Math.max(adjustedTotal - depositTotal, 0);
+    var cashRefundDue = sevenElevenFull
+      ? Math.max(depositTotal - adjustedOrderTotal, 0)
+      : Math.max(depositTotal - adjustedTotal, 0);
     var adjustedAt = formatDateTime_(new Date());
     var nextOrderRevision = currentRevision + 1;
     adjustments.push({
@@ -3630,6 +3904,10 @@ function handleAdminAdjustOrderShortage_(data) {
         ],
       ]);
     sheet.getRange(rowNumber, 34).setValue(nextOrderRevision);
+    if (sevenElevenFull)
+      sheet
+        .getRange(rowNumber, 45, 1, 2)
+        .setValues([[adjustedShippingFee, adjustedOrderTotal]]);
 
     result = {
       orderNo: orderNo,
@@ -3648,6 +3926,9 @@ function handleAdminAdjustOrderShortage_(data) {
       shortageAdjustedAt: adjustedAt,
       cashRefundDue: cashRefundDue,
       cashRefundedAt: "",
+      orderFlowMode: orderFlowModeFromRow_(row),
+      shippingFee: adjustedShippingFee,
+      orderTotal: adjustedOrderTotal,
       orderRevision: nextOrderRevision,
     };
     notificationTarget = {
@@ -3679,6 +3960,15 @@ function handleAdminAdjustOrderShortage_(data) {
       cashRefundDue: cashRefundDue,
       allItemsCancelled: allItemsCancelled,
       cancelledItems: cancelledItems,
+      orderFlowMode: orderFlowModeFromRow_(row),
+      recipientName: row[41] || row[4],
+      pickupStoreCode: row[42],
+      pickupStoreName: row[43],
+      shippingFee: number_(row[44]),
+      orderTotal: number_(row[45]) || number_(row[9]),
+      adjustedShippingFee: adjustedShippingFee,
+      adjustedOrderTotal: adjustedOrderTotal,
+      originalOrderTotal: number_(row[45]) || previousTotal,
     };
   } finally {
     lock.releaseLock();
@@ -3802,7 +4092,7 @@ function handleAdminSendOrderReminder_(data) {
     var row = sheet
       .getRange(rowNumber, 1, 1, ORDER_HEADERS_.length)
       .getDisplayValues()[0];
-    if (normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_)
+    if (!isPaymentPendingStatus_(normalizeOrderStatus_(row[15], row[17])))
       throw new Error("INVALID_ORDER_STATUS");
     var paymentSchedule = getOrderPaymentSchedule_(row);
     if (
@@ -3821,6 +4111,12 @@ function handleAdminSendOrderReminder_(data) {
       estimatedTotal: number_(row[9]),
       depositTotal: number_(row[10]),
       estimatedBalance: number_(row[11]),
+      orderFlowMode: orderFlowModeFromRow_(row),
+      recipientName: row[41] || row[4],
+      pickupStoreCode: row[42],
+      pickupStoreName: row[43],
+      shippingFee: number_(row[44]),
+      orderTotal: number_(row[45]) || number_(row[9]),
     };
   } finally {
     lock.releaseLock();
@@ -3831,7 +4127,9 @@ function handleAdminSendOrderReminder_(data) {
       buildUnifiedReminderCard_(
         target,
         message,
-        "訂金付款提醒",
+        isSevenElevenFullMode_(target.orderFlowMode)
+          ? "全款付款提醒"
+          : "訂金付款提醒",
         "",
       ),
       "reminder " + target.orderNo,
@@ -3936,6 +4234,8 @@ function setupPreorderAutomationTrigger() {
 
 function processExpiredPreorders() {
   setupQuokkaPreorder();
+  var settings = readSettings_();
+  if (!settings.paymentAutoCancelEnabled) return 0;
   var sheet = spreadsheet_().getSheetByName("Preorders");
   if (!sheet || sheet.getLastRow() < 2) return 0;
   var rows = sheet
@@ -3949,7 +4249,7 @@ function processExpiredPreorders() {
     var paymentSchedule = getOrderPaymentSchedule_(row);
     if (
       !createdAt ||
-      normalizeOrderStatus_(row[15], row[17]) !== ORDER_STATUS_PENDING_
+      !isPaymentPendingStatus_(normalizeOrderStatus_(row[15], row[17]))
     )
       return;
     var alerts = lineAlertsByUser[String(row[2] || "").trim()] || [];
@@ -3968,7 +4268,7 @@ function processExpiredPreorders() {
   });
   expiredOrderNos.forEach(function (orderNo) {
     if (orderNo)
-      cancelOrder_(orderNo, "超過訂金付款期限仍未確認收到訂金。");
+      cancelOrder_(orderNo, "超過付款期限仍未確認收到款項。");
   });
   return expiredOrderNos.length;
 }
@@ -4043,13 +4343,25 @@ function cancelOrderRowLocked_(sheet, rowNumber, row) {
     shippingStatus: row[17],
     shippedAt: row[18],
     cancelledAt: row[20],
+    cashRefundDue: row[26],
   };
   var cancelledAt = formatDateTime_(new Date());
+  var statusBeforeCancel = normalizeOrderStatus_(row[15], row[17]);
+  var paidFullBeforeShipment =
+    isSevenElevenFullMode_(orderFlowModeFromRow_(row)) &&
+    [
+      ORDER_STATUS_FULL_PAYMENT_RECEIVED_,
+      ORDER_STATUS_AWAITING_SHIPMENT_,
+    ].indexOf(statusBeforeCancel) >= 0;
   try {
     applyInventoryRestock_(plan, false);
     sheet.getRange(rowNumber, 16).setValue(ORDER_STATUS_CANCELLED_);
     sheet.getRange(rowNumber, 18, 1, 2).setValues([["未開設賣場", ""]]);
     sheet.getRange(rowNumber, 21).setValue(cancelledAt);
+    if (paidFullBeforeShipment)
+      sheet
+        .getRange(rowNumber, 27)
+        .setValue(number_(row[45]) || number_(row[10]));
   } catch (error) {
     try {
       applyInventoryRestock_(plan, true);
@@ -4058,6 +4370,7 @@ function cancelOrderRowLocked_(sheet, rowNumber, row) {
         .getRange(rowNumber, 18, 1, 2)
         .setValues([[oldOrderState.shippingStatus, oldOrderState.shippedAt]]);
       sheet.getRange(rowNumber, 21).setValue(oldOrderState.cancelledAt);
+      sheet.getRange(rowNumber, 27).setValue(oldOrderState.cashRefundDue);
     } catch (rollbackError) {
       console.error("Order cancellation rollback failed: " + rollbackError);
     }
@@ -4068,6 +4381,9 @@ function cancelOrderRowLocked_(sheet, rowNumber, row) {
   }, 0);
   return {
     cancelledAt: cancelledAt,
+    cashRefundDue: paidFullBeforeShipment
+      ? number_(row[45]) || number_(row[10])
+      : number_(row[26]),
     stockRestoredQty: restoredQty,
     stockRestoredProducts: plan.updates.length,
   };
@@ -4099,8 +4415,8 @@ function cancelOrder_(orderNo, reason) {
       };
     }
     if (
-      String(reason || "").indexOf("訂金付款期限") >= 0 &&
-      currentStatus !== ORDER_STATUS_PENDING_
+      String(reason || "").indexOf("付款期限") >= 0 &&
+      !isPaymentPendingStatus_(currentStatus)
     ) {
       return {
         orderNo: orderNo,
@@ -4122,6 +4438,12 @@ function cancelOrder_(orderNo, reason) {
       estimatedTotal: number_(row[9]),
       depositTotal: number_(row[10]),
       estimatedBalance: number_(row[11]),
+      orderFlowMode: orderFlowModeFromRow_(row),
+      recipientName: row[41] || row[4],
+      pickupStoreCode: row[42],
+      pickupStoreName: row[43],
+      shippingFee: number_(row[44]),
+      orderTotal: number_(row[45]) || number_(row[9]),
       reason: reason,
     };
   } finally {
@@ -4145,6 +4467,7 @@ function cancelOrder_(orderNo, reason) {
     duplicate: false,
     stockRestoredQty: cancellation.stockRestoredQty,
     stockRestoredProducts: cancellation.stockRestoredProducts,
+    cashRefundDue: cancellation.cashRefundDue,
   };
 }
 
@@ -4219,10 +4542,12 @@ function buildOrderCancellationMessage_(order) {
   };
 }
 
-function buildOrderReminderText_(expiresAt) {
+function buildOrderReminderText_(expiresAt, orderFlowMode) {
   return (
     "溫馨提醒：\n" +
-    "此訂單的訂金付款期限為 " +
+    "此訂單的" +
+    (isSevenElevenFullMode_(orderFlowMode) ? "全款" : "訂金") +
+    "付款期限為 " +
     formatDateTime_(expiresAt) +
     "。\n請在期限前完成匯款並回傳帳號後五碼。"
   );
@@ -4242,6 +4567,14 @@ function normalizeOrderStatus_(status, shippingStatus) {
   var value = String(status || "").trim();
   if (value === ORDER_STATUS_CANCELLED_) return ORDER_STATUS_CANCELLED_;
   if (value === ORDER_STATUS_COMPLETED_) return ORDER_STATUS_COMPLETED_;
+  if (value === ORDER_STATUS_STORE_SHIPPED_)
+    return ORDER_STATUS_STORE_SHIPPED_;
+  if (value === ORDER_STATUS_AWAITING_SHIPMENT_)
+    return ORDER_STATUS_AWAITING_SHIPMENT_;
+  if (value === ORDER_STATUS_FULL_PAYMENT_RECEIVED_)
+    return ORDER_STATUS_FULL_PAYMENT_RECEIVED_;
+  if (value === ORDER_STATUS_FULL_PAYMENT_PENDING_)
+    return ORDER_STATUS_FULL_PAYMENT_PENDING_;
   if (
     ["已出貨", "已開設賣場"].indexOf(
       String(shippingStatus || "").trim(),
@@ -4365,6 +4698,9 @@ function readPurchaseSummary_() {
       [
         ORDER_STATUS_DEPOSIT_RECEIVED_,
         ORDER_STATUS_SHIPPED_,
+        ORDER_STATUS_FULL_PAYMENT_RECEIVED_,
+        ORDER_STATUS_AWAITING_SHIPMENT_,
+        ORDER_STATUS_STORE_SHIPPED_,
         ORDER_STATUS_COMPLETED_,
       ].indexOf(status) < 0
     )
@@ -4628,6 +4964,14 @@ function handleAdminSaveSettings_(data) {
       source.saleClosed === undefined
         ? currentSettings.saleClosed
         : source.saleClosed === true,
+    saleClosesAt:
+      source.saleClosesAt === undefined
+        ? currentSettings.saleClosesAt
+        : normalizeSettingsDateTime_(source.saleClosesAt),
+    paymentAutoCancelEnabled:
+      source.paymentAutoCancelEnabled === undefined
+        ? currentSettings.paymentAutoCancelEnabled
+        : source.paymentAutoCancelEnabled === true,
     saleClosedNotice:
       source.saleClosedNotice === undefined
         ? currentSettings.saleClosedNotice
@@ -4689,6 +5033,12 @@ function handleAdminSaveSettings_(data) {
       ],
       ["preorderNotice", settings.preorderNotice, "前台預購說明"],
       ["saleClosed", settings.saleClosed, "前台停賣"],
+      ["saleClosesAt", settings.saleClosesAt, "前台定時停止收單"],
+      [
+        "paymentAutoCancelEnabled",
+        settings.paymentAutoCancelEnabled,
+        "付款逾期自動取消",
+      ],
       ["saleClosedNotice", settings.saleClosedNotice, "停賣公告"],
       ["iopenMallUrl", settings.iopenMallUrl, "iOPEN Mall 網址"],
       [
@@ -4752,7 +5102,7 @@ function hashAccessCode_(accessCode, salt) {
     .join("");
 }
 
-function validatePreorderFields_(data) {
+function validatePreorderFields_(data, settings) {
   if (!data || !Array.isArray(data.items) || !data.items.length)
     throw new Error("INVALID_ITEMS");
   if (
@@ -4760,6 +5110,28 @@ function validatePreorderFields_(data) {
     !String(data.phone || "").trim()
   )
     throw new Error("INVALID_CUSTOMER");
+  if (isSevenElevenFullMode_(settings && settings.orderFlowMode)) {
+    var recipientName = cleanText_(data.recipientName, 30);
+    var storeCode = cleanText_(data.pickupStoreCode, 20);
+    var storeName = cleanText_(data.pickupStoreName, 80);
+    if (!recipientName || !/^\d{6}$/.test(storeCode) || !storeName)
+      throw new Error("INVALID_PICKUP_DETAILS");
+  }
+}
+
+function normalizeSettingsDateTime_(value) {
+  var text = String(value || "").trim();
+  if (!text) return "";
+  text = text.replace("T", " ");
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) text += ":00";
+  if (!parseOrderDate_(text)) throw new Error("INVALID_SETTINGS");
+  return text;
+}
+
+function isSaleClosed_(settings, now) {
+  if (settings && settings.saleClosed) return true;
+  var closesAt = parseOrderDate_(settings && settings.saleClosesAt);
+  return !!closesAt && (now || new Date()).getTime() >= closesAt.getTime();
 }
 
 function validateProduct_(source) {
@@ -4908,6 +5280,9 @@ function rowToProduct_(row, legacyExchangeRate) {
 
 function readSettings_() {
   var settings = Object.assign({}, DEFAULT_SETTINGS_);
+  var initialDeployment = readDeploymentOrderFlow_();
+  settings.orderFlowMode = initialDeployment.orderFlowMode;
+  settings.shippingFeeTwd = initialDeployment.shippingFeeTwd;
   var sheet = spreadsheet_().getSheetByName("Settings");
   if (!sheet || sheet.getLastRow() < 2) return settings;
   var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
@@ -4935,6 +5310,11 @@ function readSettings_() {
       settings.preorderNotice = String(row[1] || "").trim();
     if (key === "saleClosed")
       settings.saleClosed = String(row[1] || "").toLowerCase() === "true";
+    if (key === "saleClosesAt")
+      settings.saleClosesAt = String(row[1] || "").trim();
+    if (key === "paymentAutoCancelEnabled")
+      settings.paymentAutoCancelEnabled =
+        String(row[1] || "").toLowerCase() === "true";
     if (key === "saleClosedNotice")
       settings.saleClosedNotice =
         String(row[1] || "").trim() || DEFAULT_SETTINGS_.saleClosedNotice;
@@ -4964,6 +5344,47 @@ function readSettings_() {
     settings.preorderNotice = DEFAULT_SETTINGS_.preorderNotice;
   }
   return settings;
+}
+
+function readDeploymentOrderFlow_() {
+  var mode = DEFAULT_SETTINGS_.orderFlowMode;
+  var shippingFee = DEFAULT_SETTINGS_.shippingFeeTwd;
+  try {
+    var properties = PropertiesService.getScriptProperties();
+    var configuredMode = String(
+      properties.getProperty("ORDER_FLOW_MODE") || "",
+    ).trim();
+    if (
+      [ORDER_FLOW_MALL_DEPOSIT_, ORDER_FLOW_SEVEN_ELEVEN_FULL_].indexOf(
+        configuredMode,
+      ) >= 0
+    )
+      mode = configuredMode;
+    var configuredFee = Number(properties.getProperty("SHIPPING_FEE_TWD"));
+    if (
+      Number.isInteger(configuredFee) &&
+      configuredFee >= 0 &&
+      configuredFee <= 10000
+    )
+      shippingFee = configuredFee;
+  } catch (error) {
+    // Node 測試或尚未部署時沿用安全預設值。
+  }
+  return { orderFlowMode: mode, shippingFeeTwd: shippingFee };
+}
+
+function isSevenElevenFullMode_(value) {
+  return String(value || "").trim() === ORDER_FLOW_SEVEN_ELEVEN_FULL_;
+}
+
+function orderFlowModeFromRow_(row) {
+  return String((row && row[40]) || ORDER_FLOW_MALL_DEPOSIT_).trim();
+}
+
+function isPaymentPendingStatus_(status) {
+  return [ORDER_STATUS_PENDING_, ORDER_STATUS_FULL_PAYMENT_PENDING_].indexOf(
+    String(status || "").trim(),
+  ) >= 0;
 }
 
 function requireAdmin_(idToken, adminSessionToken) {
@@ -5049,7 +5470,7 @@ function ensureSheet_(ss, name, headers) {
 function ensureSettingsSheet_(ss) {
   var sheet = ensureSheet_(ss, "Settings", SETTING_HEADERS_);
   if (sheet.getLastRow() < 2) {
-    sheet.getRange(2, 1, 18, 3).setValues([
+    sheet.getRange(2, 1, 19, 3).setValues([
       ["exchangeRate", DEFAULT_SETTINGS_.exchangeRate, "韓幣換算率"],
       ["fixedMarkupTwd", DEFAULT_SETTINGS_.fixedMarkupTwd, "固定加價金額"],
       ["depositPercent", DEFAULT_SETTINGS_.depositPercent, "訂金比例"],
@@ -5075,6 +5496,12 @@ function ensureSettingsSheet_(ss) {
       ],
       ["preorderNotice", DEFAULT_SETTINGS_.preorderNotice, "前台預購說明"],
       ["saleClosed", DEFAULT_SETTINGS_.saleClosed, "前台停賣"],
+      ["saleClosesAt", DEFAULT_SETTINGS_.saleClosesAt, "前台定時停止收單"],
+      [
+        "paymentAutoCancelEnabled",
+        DEFAULT_SETTINGS_.paymentAutoCancelEnabled,
+        "付款逾期自動取消",
+      ],
       ["saleClosedNotice", DEFAULT_SETTINGS_.saleClosedNotice, "停賣公告"],
       ["bankTransferInfo", "", "訂金匯款資訊"],
       ["bankName", "", "銀行名稱"],

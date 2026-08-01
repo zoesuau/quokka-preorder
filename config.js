@@ -5,5 +5,5 @@ window.QUOKKA_CONFIG = {
   liffId: "2010743514-C2ckA5v9",
   // 後台預設使用管理登入碼；只有建立獨立後台 LIFF 時才填入。
   adminLiffId: "",
-  brandName: "鼠購易｜韓國小物預購",
+  brandName: "Echo連線代購",
 };

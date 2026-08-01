@@ -420,6 +420,52 @@ test("缺貨調整也會推進版本，避免舊編輯頁覆蓋", () => {
   assert.equal(JSON.parse(row[6])[0].qty, 1);
 });
 
+test("7-11 全款部分缺貨保留每單運費並只退商品差額", () => {
+  const { context, row } = createHarness("已收到全款", {
+    10: 260,
+    11: 0,
+    17: "待寄出",
+    40: "seven_eleven_full",
+    44: 60,
+    45: 260,
+  });
+  context.handleAdminAdjustOrderShortage_({
+    orderNo: "QK-TEST",
+    adjustmentId: "seven-eleven-partial-shortage",
+    expectedRevision: 0,
+    expectedStatus: "已收到全款",
+    cancellations: [{ index: 0, qty: 1 }],
+  });
+  assert.equal(row[9], 100);
+  assert.equal(row[26], 100);
+  assert.equal(row[44], 60);
+  assert.equal(row[45], 160);
+  assert.equal(row[15], "已收到全款");
+});
+
+test("7-11 全款全部缺貨會連同運費列入待退款", () => {
+  const { context, row } = createHarness("待寄出", {
+    10: 260,
+    11: 0,
+    17: "待寄出",
+    40: "seven_eleven_full",
+    44: 60,
+    45: 260,
+  });
+  context.handleAdminAdjustOrderShortage_({
+    orderNo: "QK-TEST",
+    adjustmentId: "seven-eleven-full-shortage",
+    expectedRevision: 0,
+    expectedStatus: "待寄出",
+    cancellations: [{ index: 0, qty: 2 }],
+  });
+  assert.equal(row[9], 0);
+  assert.equal(row[26], 260);
+  assert.equal(row[44], 0);
+  assert.equal(row[45], 0);
+  assert.equal(row[15], "已取消");
+});
+
 test("一般調整只接受顧客變更或管理修正", () => {
   const { context } = createHarness("待收訂金");
   assert.throws(
@@ -714,7 +760,7 @@ test("本次停用顧客匯款回報入口與藍色狀態轉換", () => {
   const storefrontHtml = fs.readFileSync("index.html", "utf8");
   assert.equal(backendSource.includes('if (action === "confirmPreorderPayment")'), false);
   assert.equal(backendSource.includes("已匯款，前往回報"), false);
-  assert.equal(backendSource.includes("if (status !== ORDER_STATUS_PENDING_) return;"), true);
+  assert.equal(backendSource.includes("if (!isPaymentPendingStatus_(status)) return;"), true);
   assert.equal(storefrontSource.includes("data-report-payment"), false);
   assert.equal(storefrontSource.includes('action: "confirmPreorderPayment"'), false);
   assert.equal(storefrontHtml.includes("paymentReportDialog"), false);

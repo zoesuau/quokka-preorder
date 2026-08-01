@@ -3,15 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#3d332d" />
-    <title>鼠購易｜商品後台</title>
+    <meta name="theme-color" content="#f7f7f5" />
+    <title>Echo連線代購｜管理後台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=20260801-product-inventory" />
-    <link rel="stylesheet" href="admin.css?v=20260801-product-archive" />
+    <link rel="stylesheet" href="style.css?v=20260802-golden-crane-theme" />
+    <link rel="stylesheet" href="admin.css?v=20260802-golden-crane-white-gray" />
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
     <script src="config.js?v=20260717-liff" defer></script>
-    <script src="admin.js?v=20260801-product-archive" defer></script>
+    <script src="admin.js?v=20260801-seven-eleven-full" defer></script>
   </head>
   <body class="admin-page">
     <header class="admin-header">
@@ -98,11 +99,12 @@
             <div class="settings-section-heading"><p class="eyebrow">STOREFRONT</p><h2>前台顯示</h2></div>
             <label class="field"><span>前台預購說明</span><textarea id="adminPreorderNotice" rows="4" maxlength="300"></textarea></label>
             <label class="switch-field sale-closed-switch"><span>前台停賣</span><input id="saleClosed" type="checkbox" /><i></i></label>
+            <label class="field"><span>定時停止收單（選填）</span><input id="saleClosesAt" type="datetime-local" /></label>
             <label class="field"><span>停賣公告</span><textarea id="saleClosedNotice" rows="3" maxlength="300" placeholder="本次連線已結束，謝謝大家的支持！"></textarea></label>
             <button class="secondary-button" type="submit" formnovalidate data-settings-section="storefront">儲存前台顯示</button>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section" id="paymentSettingsSection">
             <div class="settings-section-heading"><p class="eyebrow">PRICING</p><h2>共用計價規則</h2></div>
             <p class="settings-note">只套用於新增商品，或重新修改商品的韓幣售價；不會重算既有商品與訂單。</p>
             <label class="field"><span>韓幣換算費率</span><input id="exchangeRate" type="number" min="0.000001" max="10" step="0.000001" inputmode="decimal" required /></label>
@@ -112,22 +114,28 @@
           </section>
 
           <section class="settings-section">
-            <div class="settings-section-heading"><p class="eyebrow">DEPOSIT</p><h2>訂金與付款規則</h2></div>
+            <div class="settings-section-heading"><p class="eyebrow">PAYMENT</p><h2 id="paymentSettingsTitle">訂金與付款規則</h2></div>
             <p class="settings-note warning">只套用於儲存後成立的新訂單；舊訂單維持成立時的規則。</p>
-            <label class="field"><span>訂金比例（%）</span><input id="depositPercent" type="number" min="1" max="100" step="1" inputmode="numeric" required /></label>
-            <label class="field"><span>訂金提醒起始時間（小時）</span><input id="paymentReminderHours" type="number" min="1" max="720" step="1" inputmode="numeric" required /></label>
+            <label class="field" id="depositPercentField"><span>訂金比例（%）</span><input id="depositPercent" type="number" min="1" max="100" step="1" inputmode="numeric" required /></label>
+            <label class="field"><span id="paymentReminderLabel">訂金提醒起始時間（小時）</span><input id="paymentReminderHours" type="number" min="1" max="720" step="1" inputmode="numeric" required /></label>
             <label class="field"><span>顧客付款期限（小時）</span><input id="paymentDeadlineHours" type="number" min="2" max="720" step="1" inputmode="numeric" required /></label>
             <label class="field"><span>內部寬限時間（小時）</span><input id="paymentGraceHours" type="number" min="0" max="168" step="1" inputmode="numeric" required /></label>
+            <label class="switch-field"><span>付款逾期自動取消</span><input id="paymentAutoCancelEnabled" type="checkbox" /><i></i></label>
             <p class="settings-formula" id="paymentRulePreview"></p>
-            <button class="secondary-button" type="submit" formnovalidate data-settings-section="deposit">儲存訂金規則</button>
+            <button class="secondary-button" type="submit" formnovalidate data-settings-section="deposit" id="savePaymentSettings">儲存付款規則</button>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section" id="mallSettingsSection">
             <div class="settings-section-heading"><p class="eyebrow">IOPEN MALL</p><h2>iOPEN Mall</h2></div>
             <label class="field"><span>賣場網址</span><input id="iopenMallUrl" type="url" maxlength="500" /></label>
             <label class="field"><span>賣場付款期限（日）</span><input id="iopenMallPaymentDays" type="number" min="1" max="60" step="1" inputmode="numeric" required /></label>
             <p class="settings-note">到期前 1 日可由管理員手動提醒；逾期只在後台警示，不會自動取消或自動發送通知。</p>
             <button class="secondary-button" type="submit" formnovalidate data-settings-section="mall">儲存 iOPEN Mall 設定</button>
+          </section>
+
+          <section class="settings-section" id="sevenElevenModeSummary" hidden>
+            <div class="settings-section-heading"><p class="eyebrow">ORDER FLOW</p><h2>7-11 店到店＋全款</h2></div>
+            <p class="settings-note">此客戶固定使用 7-11 店到店，每張訂單一次支付商品全款與 NT$<span id="sevenElevenShippingFee">60</span> 運費。方案由部署設定控制，賣家不可在營運中切換。</p>
           </section>
         </form>
 
