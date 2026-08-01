@@ -37,11 +37,14 @@ function messageBox(card) {
   return card.contents.body.contents[0];
 }
 
-test("收到預購訂單維持原本無底色的訊息文字", () => {
+test("一般通知使用金鶴賣深金標題與暖白卡片", () => {
   const card = context.buildUnifiedOrderSuccessCard_(sampleOrder());
   assert.equal(messageBox(card).type, "text");
-  assert.equal(card.contents.styles.header.backgroundColor, "#47748E");
+  assert.equal(card.contents.styles.header.backgroundColor, "#8F5E1C");
+  assert.equal(card.contents.header.contents[1].color, "#F4E8D1");
   assert.equal(card.contents.body.backgroundColor, "#FFFDF7");
+  assert.equal(card.contents.footer.contents[0].color, "#A87324");
+  assert.equal(card.contents.styles.footer.separatorColor, "#E9E2D7");
 });
 
 test("付款提醒使用淡粉紅底與紅色文字", () => {
@@ -56,10 +59,21 @@ test("付款提醒使用淡粉紅底與紅色文字", () => {
   assert.equal(messageBox(card).contents[0].color, "#C13E4D");
 });
 
-test("收到訂金的確認區塊使用蛋黃底色", () => {
+test("收到款項的確認區塊使用品牌淡金底色", () => {
   const card = context.buildUnifiedDepositReceivedCard_(sampleOrder());
-  assert.equal(messageBox(card).backgroundColor, "#FFF0B8");
-  assert.equal(messageBox(card).contents[0].color, "#805B00");
+  assert.equal(messageBox(card).backgroundColor, "#F4E8D1");
+  assert.equal(messageBox(card).contents[0].color, "#8F5E1C");
+});
+
+test("已寄出保留綠色狀態提示但標題仍使用品牌深金", () => {
+  const card = context.buildUnifiedStoreShippedCard_(sampleOrder({
+    orderFlowMode: "seven_eleven_full",
+    shippingFee: 60,
+    orderTotal: 1060,
+  }));
+  assert.equal(card.contents.styles.header.backgroundColor, "#8F5E1C");
+  assert.equal(messageBox(card).backgroundColor, "#E8F4EC");
+  assert.equal(messageBox(card).contents[0].color, "#2F6D46");
 });
 
 test("iOPEN Mall 賣場按鈕使用珊瑚紅色", () => {

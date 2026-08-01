@@ -1747,9 +1747,9 @@ function buildOrderSuccessMessage_(order) {
       text: order.itemsSummary,
       wrap: true,
       size: "sm",
-      color: "#304B59",
+      color: "#25343B",
     },
-    { type: "separator", margin: "lg", color: "#E6DED5" },
+    { type: "separator", margin: "lg", color: "#E9E2D7" },
     moneyRow_("商品總件數", formatMoney_(order.totalQty) + " 件"),
     moneyRow_("商品總額", "NT$" + formatMoney_(order.estimatedTotal)),
     moneyRow_(
@@ -1757,10 +1757,10 @@ function buildOrderSuccessMessage_(order) {
         number_(order.depositPercent || DEFAULT_SETTINGS_.depositPercent) +
         "%）",
       "NT$" + formatMoney_(order.depositTotal),
-      "#EF0025",
+      "#8F5E1C",
     ),
     moneyRow_("回國後剩餘商品款", "NT$" + formatMoney_(order.estimatedBalance)),
-    { type: "separator", margin: "lg", color: "#E6DED5" },
+    { type: "separator", margin: "lg", color: "#E9E2D7" },
     {
       type: "text",
       text: "請於 24 小時內完成訂金匯款，才算完成預訂。",
@@ -1776,7 +1776,7 @@ function buildOrderSuccessMessage_(order) {
       weight: "bold",
       size: "sm",
       margin: "lg",
-      color: "#304B59",
+      color: "#25343B",
     },
     {
       type: "text",
@@ -1784,7 +1784,7 @@ function buildOrderSuccessMessage_(order) {
       wrap: true,
       size: "xs",
       margin: "sm",
-      color: "#75858D",
+      color: "#746B60",
     },
   ];
   return {
@@ -1797,8 +1797,8 @@ function buildOrderSuccessMessage_(order) {
     contents: {
       type: "bubble",
       styles: {
-        header: { backgroundColor: "#47748E" },
-        footer: { separator: true, separatorColor: "#E6DED5" },
+        header: { backgroundColor: "#8F5E1C" },
+        footer: { separator: true, separatorColor: "#E9E2D7" },
       },
       header: {
         type: "box",
@@ -1815,7 +1815,7 @@ function buildOrderSuccessMessage_(order) {
           {
             type: "text",
             text: order.orderNo,
-            color: "#DCECF3",
+            color: "#F4E8D1",
             size: "sm",
             margin: "sm",
           },
@@ -1837,7 +1837,7 @@ function buildOrderSuccessMessage_(order) {
           {
             type: "button",
             style: "primary",
-            color: "#47748E",
+            color: "#A87324",
             height: "sm",
             action: {
               type: "message",
@@ -1861,14 +1861,14 @@ function moneyRow_(label, value, valueColor, labelColor) {
         type: "text",
         text: label,
         size: "sm",
-        color: labelColor || "#75858D",
+        color: labelColor || "#746B60",
         flex: 3,
       },
       {
         type: "text",
         text: value,
         size: "sm",
-        color: valueColor || "#304B59",
+        color: valueColor || "#25343B",
         weight: "bold",
         align: "end",
         flex: 2,
@@ -1911,7 +1911,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
     {
       type: "separator",
       margin: "lg",
-      color: options.separatorColor || "#C8D8DF",
+      color: options.separatorColor || "#E9E2D7",
     },
     themedMoneyRow_("訂購人", order.customerName || "—"),
     themedMoneyRow_("訂單時間", order.createdAt || "—"),
@@ -1926,7 +1926,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
     {
       type: "separator",
       margin: "lg",
-      color: options.separatorColor || "#C8D8DF",
+      color: options.separatorColor || "#E9E2D7",
     },
   ];
   if (isSevenElevenFullMode_(order.orderFlowMode)) {
@@ -1959,7 +1959,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
         themedMoneyRow_(
           options.depositLabel || "應付全款",
           "NT$" + formatMoney_(order.orderTotal || order.depositTotal),
-          options.depositValueColor || "#EF0025",
+          options.depositValueColor || "#8F5E1C",
         ),
       );
       (options.extraRows || []).forEach(function (row) {
@@ -1979,7 +1979,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
         themedMoneyRow_(
           options.depositLabel || "訂金",
           "NT$" + formatMoney_(order.depositTotal),
-          options.depositValueColor || "#EF0025",
+          options.depositValueColor || "#8F5E1C",
         ),
       );
     if (order.estimatedBalance !== undefined)
@@ -2002,11 +2002,11 @@ function buildUnifiedOrderCard_(order, title, message, options) {
       type: "bubble",
       styles: {
         header: {
-          backgroundColor: options.headerBackgroundColor || "#47748E",
+          backgroundColor: options.headerBackgroundColor || "#8F5E1C",
         },
         footer: {
           separator: true,
-          separatorColor: options.separatorColor || "#C8D8DF",
+          separatorColor: options.separatorColor || "#E9E2D7",
         },
       },
       header: {
@@ -2025,7 +2025,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
           {
             type: "text",
             text: order.orderNo,
-            color: options.orderNoColor || "#F1C84B",
+            color: options.orderNoColor || "#F4E8D1",
             weight: "bold",
             size: "sm",
             margin: "sm",
@@ -2053,7 +2053,7 @@ function buildUnifiedOrderCard_(order, title, message, options) {
           style: index === 0 ? "primary" : "secondary",
           color:
             index === 0
-              ? options.primaryButtonColor || "#47748E"
+              ? options.primaryButtonColor || "#A87324"
               : undefined,
           height: "sm",
           action: button,
@@ -2132,8 +2132,8 @@ function buildUnifiedDepositReceivedCard_(order) {
     {
       depositLabel: sevenElevenFull ? "已收全款" : "已收訂金",
       balanceLabel: "回國後剩餘商品款",
-      messageBackgroundColor: "#FFF0B8",
-      messageColor: "#805B00",
+      messageBackgroundColor: "#F4E8D1",
+      messageColor: "#8F5E1C",
     },
   );
 }
@@ -2237,7 +2237,7 @@ function buildAdjustmentMoneyRows_(order) {
       {
         label: "已收全款",
         value: "NT$" + formatMoney_(order.receivedDeposit),
-        color: "#EF0025",
+        color: "#8F5E1C",
       },
       { label: "商品件數", value: formatMoney_(order.totalQty) + " 件" },
       {
@@ -2298,7 +2298,7 @@ function buildAdjustmentMoneyRows_(order) {
     {
       label: receivedLabel,
       value: "NT$" + formatMoney_(receivedDeposit),
-      color: "#EF0025",
+      color: "#8F5E1C",
     },
     {
       label: "商品件數",
@@ -2319,7 +2319,7 @@ function buildAdjustmentMoneyRows_(order) {
     {
       label: "調整後應付尾款",
       value: "NT$" + formatMoney_(order.adjustedBalance),
-      color: "#EF0025",
+      color: "#8F5E1C",
     },
   ];
   if (number_(order.cashRefundDue) > 0)
@@ -3237,7 +3237,7 @@ function buildDepositReceivedMessage_(order) {
     altText: "已收到訂金｜" + order.orderNo,
     contents: {
       type: "bubble",
-      styles: { header: { backgroundColor: "#47748E" } },
+      styles: { header: { backgroundColor: "#8F5E1C" } },
       header: {
         type: "box",
         layout: "vertical",
@@ -3253,7 +3253,7 @@ function buildDepositReceivedMessage_(order) {
           {
             type: "text",
             text: order.orderNo,
-            color: "#DCECF3",
+            color: "#F4E8D1",
             size: "sm",
             margin: "sm",
           },
@@ -3263,7 +3263,7 @@ function buildDepositReceivedMessage_(order) {
         type: "box",
         layout: "vertical",
         paddingAll: "18px",
-        backgroundColor: "#F3F9FC",
+        backgroundColor: "#FFFDF7",
         contents: [
           {
             type: "text",
@@ -3271,7 +3271,7 @@ function buildDepositReceivedMessage_(order) {
             wrap: true,
             weight: "bold",
             size: "md",
-            color: "#304B59",
+            color: "#25343B",
           },
           moneyRow_("訂購人", order.customerName || "—"),
           moneyRow_("已收訂金", "NT$" + formatMoney_(order.depositTotal)),
