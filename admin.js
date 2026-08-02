@@ -55,6 +55,7 @@ function bindAdminEvents() {
   document.querySelector(".stock-quick-options").addEventListener("click", selectQuickStockQuantity);
   document.getElementById("stockEditorQuantity").addEventListener("input", updateQuickStockSelection);
   document.getElementById("settingsForm").addEventListener("submit", saveSettings);
+  document.getElementById("categoryOrderList").addEventListener("click", moveCategoryOrder);
   document.getElementById("passwordForm").addEventListener("submit", changeAdminAccessCode);
   ["paymentDeadlineHours", "paymentGraceHours"].forEach((id) => document.getElementById(id).addEventListener("input", updatePaymentRulePreview));
   document.getElementById("adminProductList").addEventListener("click", handleProductAction);
@@ -758,6 +759,52 @@ function renderAdminProducts() {
   else setAdminStatus("", true);
 }
 
+const traditionalStrokeCollator = new Intl.Collator("zh-Hant-TW-u-co-stroke", { sensitivity: "base", numeric: true });
+
+function normalizedCategoryOrder() {
+  const configured = Array.isArray(adminState.settings.categoryOrder) ? adminState.settings.categoryOrder : [];
+  const productCategories = adminState.products.map((product) => String(product.category || "").trim()).filter(Boolean);
+  const categories = [...new Set([...configured, ...productCategories])];
+  const configuredSet = new Set(configured);
+  const remaining = categories.filter((category) => !configuredSet.has(category)).sort(traditionalStrokeCollator.compare);
+  return [...configured.filter((category) => categories.includes(category)), ...remaining];
+}
+
+function sortAdminProducts() {
+  const categoryOrder = normalizedCategoryOrder();
+  const categoryIndexes = new Map(categoryOrder.map((category, index) => [category, index]));
+  adminState.products.sort((a, b) => {
+    const categoryDifference = (categoryIndexes.get(a.category) ?? Number.MAX_SAFE_INTEGER) - (categoryIndexes.get(b.category) ?? Number.MAX_SAFE_INTEGER);
+    if (categoryDifference) return categoryDifference;
+    const aPinned = Number(a.featuredOrder) > 0;
+    const bPinned = Number(b.featuredOrder) > 0;
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+    if (aPinned && Number(a.featuredOrder) !== Number(b.featuredOrder)) return Number(a.featuredOrder) - Number(b.featuredOrder);
+    return traditionalStrokeCollator.compare(a.name, b.name) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) || String(a.id).localeCompare(String(b.id));
+  });
+}
+
+function renderCategoryOrder() {
+  const categories = normalizedCategoryOrder();
+  adminState.settings.categoryOrder = categories;
+  const list = document.getElementById("categoryOrderList");
+  list.innerHTML = categories.length
+    ? categories.map((category, index) => `<div class="category-order-item"><b>${index + 1}</b><span>${escapeHtml(category)}</span><button type="button" data-category-move="up" data-category-index="${index}" aria-label="將 ${escapeAttr(category)} 上移" ${index === 0 ? "disabled" : ""}>↑</button><button type="button" data-category-move="down" data-category-index="${index}" aria-label="將 ${escapeAttr(category)} 下移" ${index === categories.length - 1 ? "disabled" : ""}>↓</button></div>`).join("")
+    : '<p class="category-order-empty">建立商品分類後，就能在這裡調整順序。</p>';
+}
+
+function moveCategoryOrder(event) {
+  const button = event.target.closest("[data-category-move]");
+  if (!button) return;
+  const categories = normalizedCategoryOrder();
+  const index = Number(button.dataset.categoryIndex);
+  const targetIndex = button.dataset.categoryMove === "up" ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= categories.length) return;
+  [categories[index], categories[targetIndex]] = [categories[targetIndex], categories[index]];
+  adminState.settings.categoryOrder = categories;
+  renderCategoryOrder();
+}
+
 function productImageUrls(product) {
   const urls = Array.isArray(product?.imageUrls) ? product.imageUrls : [];
   return [...new Set([...urls, product?.imageUrl].map((url) => String(url || "").trim()).filter(Boolean))].slice(0, 10);
@@ -803,7 +850,7 @@ function updateNewCategoryField() {
 }
 
 function openEditor(product = null) {
-  const categories = [...new Set(adminState.products.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  const categories = normalizedCategoryOrder();
   const selectedCategory = product?.category || "";
   const categorySelect = document.getElementById("productCategory");
   categorySelect.innerHTML = `<option value="">請選擇分類</option>${categories.map((category) => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join("")}<option value="__new__">＋ 新增分類</option>`;
@@ -820,7 +867,7 @@ function openEditor(product = null) {
   document.getElementById("productTwdPrice").value = product?.priceTwd || "";
   document.getElementById("productVariants").value = Array.isArray(product?.variants) ? product.variants.join(", ") : (product?.variants || "");
   document.getElementById("productDescription").value = product?.description || "";
-  document.getElementById("productSortOrder").value = product?.sortOrder ?? adminState.products.length + 1;
+  document.getElementById("productSortOrder").value = Number(product?.featuredOrder) > 0 ? product.featuredOrder : "";
   document.getElementById("productStatus").value = product && !product.active ? "inactive" : "active";
   document.getElementById("productStatus").disabled = Boolean(product?.archived);
   const archiveSection = document.getElementById("productArchiveSection");
@@ -1014,7 +1061,7 @@ async function saveProduct(event) {
       priceTwd: Number(document.getElementById("productTwdPrice").value),
       variants: parseVariants(document.getElementById("productVariants").value),
       description: document.getElementById("productDescription").value.trim(),
-      sortOrder: Number(document.getElementById("productSortOrder").value || 0),
+      featuredOrder: Number(document.getElementById("productSortOrder").value || 0),
       active: document.getElementById("productStatus").value === "active" && Number(stockValue) > 0,
     };
     if (!product.imageUrl) throw new Error("IMAGE_REQUIRED");
@@ -1024,7 +1071,8 @@ async function saveProduct(event) {
     const index = adminState.products.findIndex((item) => item.id === result.product.id);
     if (index >= 0) adminState.products[index] = result.product;
     else adminState.products.push(result.product);
-    adminState.products.sort((a, b) => a.sortOrder - b.sortOrder);
+    sortAdminProducts();
+    renderCategoryOrder();
     document.getElementById("productEditor").close();
     renderAdminProducts();
     showToast("商品已儲存");
@@ -1048,6 +1096,7 @@ function fillSettings() {
   document.getElementById("paymentGraceHours").value = adminState.settings.paymentGraceHours ?? 1;
   document.getElementById("iopenMallUrl").value = adminState.settings.iopenMallUrl || "";
   document.getElementById("iopenMallPaymentDays").value = adminState.settings.iopenMallPaymentDays || 8;
+  renderCategoryOrder();
   updatePaymentRulePreview();
   updateAdminPricePreview();
 }
@@ -1062,6 +1111,11 @@ async function saveSettings(event) {
         saleClosedNotice: document.getElementById("saleClosedNotice").value.trim(),
         preorderNotice: document.getElementById("adminPreorderNotice").value.trim(),
       }
+    : section === "categories"
+      ? {
+          section,
+          categoryOrder: normalizedCategoryOrder(),
+        }
     : section === "pricing"
       ? {
           section,
@@ -1087,6 +1141,8 @@ async function saveSettings(event) {
     const result = await adminPost({ action: "adminSaveSettings", settings });
     if (!result.ok) throw new Error(result.error || "SETTINGS_FAILED");
     adminState.settings = result.settings;
+    sortAdminProducts();
+    renderAdminProducts();
     updateAdminPricePreview();
     fillSettings();
     showToast("設定已儲存");

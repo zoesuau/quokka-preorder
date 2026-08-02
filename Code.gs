@@ -23,6 +23,7 @@ var PRODUCT_HEADERS_ = [
   "priceTwd",
   "stockQuantity",
   "imageUrlsJson",
+  "featuredOrder",
 ];
 
 var ORDER_HEADERS_ = [
@@ -213,7 +214,7 @@ var LINE_EVENT_HEADERS_ = [
 ];
 
 var SETTING_HEADERS_ = ["key", "value", "label"];
-var PUBLIC_CATALOG_CACHE_KEY_ = "public-catalog-v2";
+var PUBLIC_CATALOG_CACHE_KEY_ = "public-catalog-v3";
 var PUBLIC_CATALOG_CACHE_SECONDS_ = 300;
 var DEFAULT_SETTINGS_ = {
   exchangeRate: 0.022,
@@ -227,6 +228,7 @@ var DEFAULT_SETTINGS_ = {
     "商品下訂後才會採購。下單先付商品總額的 50% 訂金，回國後再支付剩餘商品款。",
   saleClosed: false,
   saleClosedNotice: "本次連線已結束，謝謝大家的支持！",
+  categoryOrder: [],
   bankTransferInfo: "",
   bankName: "",
   bankCode: "",
@@ -382,6 +384,7 @@ function handleReadPublicCatalog_() {
         saleClosed: settings.saleClosed,
         saleClosedNotice: settings.saleClosedNotice,
         depositPercent: settings.depositPercent,
+        categoryOrder: settings.categoryOrder,
       },
     };
     writePublicCatalogCache_(payload);
@@ -4418,6 +4421,9 @@ function handleAdminSaveProduct_(data) {
     var currentStatus = rowNumber
       ? String(sheet.getRange(rowNumber, 8).getDisplayValue() || "").trim()
       : "";
+    var legacySortOrder = rowNumber
+      ? sheet.getRange(rowNumber, 9).getValue()
+      : "";
     var row = [
       product.id,
       product.name,
@@ -4431,12 +4437,13 @@ function handleAdminSaveProduct_(data) {
         : product.active && product.stockQuantity > 0
           ? "上架"
           : "下架",
-      product.sortOrder,
+      legacySortOrder,
       createdAt,
       now,
       product.priceTwd,
       product.stockQuantity,
       JSON.stringify(product.imageUrls),
+      product.featuredOrder || "",
     ];
     if (rowNumber)
       sheet.getRange(rowNumber, 1, 1, PRODUCT_HEADERS_.length).setValues([row]);
@@ -4590,6 +4597,11 @@ function handleAdminUploadProductImage_(data) {
 function handleAdminSaveSettings_(data) {
   requireAdmin_(data.idToken, data.adminSessionToken);
   var source = data.settings || {};
+  if (
+    source.categoryOrder !== undefined &&
+    !Array.isArray(source.categoryOrder)
+  )
+    throw new Error("INVALID_SETTINGS");
   var currentSettings = readSettings_();
   var settings = {
     exchangeRate:
@@ -4637,6 +4649,10 @@ function handleAdminSaveSettings_(data) {
       source.iopenMallUrl === undefined
         ? currentSettings.iopenMallUrl
         : cleanText_(source.iopenMallUrl, 500),
+    categoryOrder:
+      source.categoryOrder === undefined
+        ? currentSettings.categoryOrder
+        : normalizeCategoryOrder_(source.categoryOrder),
   };
   if (
     !isFinite(settings.exchangeRate) ||
@@ -4690,6 +4706,7 @@ function handleAdminSaveSettings_(data) {
       ["preorderNotice", settings.preorderNotice, "前台預購說明"],
       ["saleClosed", settings.saleClosed, "前台停賣"],
       ["saleClosedNotice", settings.saleClosedNotice, "停賣公告"],
+      ["categoryOrder", JSON.stringify(settings.categoryOrder), "前台分類順序"],
       ["iopenMallUrl", settings.iopenMallUrl, "iOPEN Mall 網址"],
       [
         "bankTransferInfo",
@@ -4796,7 +4813,7 @@ function validateProduct_(source) {
     variants: variants,
     description: cleanText_(source.description, 500),
     active: source.active === true,
-    sortOrder: Number(source.sortOrder || 0),
+    featuredOrder: Number(source.featuredOrder || 0),
     stockQuantity: Number(source.stockQuantity),
   };
   if (!product.name || !product.category || !product.imageUrl)
@@ -4821,34 +4838,91 @@ function validateProduct_(source) {
   )
     throw new Error("INVALID_PRODUCT");
   if (
-    !Number.isInteger(product.sortOrder) ||
-    product.sortOrder < 0 ||
-    product.sortOrder > 9999
+    !Number.isInteger(product.featuredOrder) ||
+    product.featuredOrder < 0 ||
+    product.featuredOrder > 9999
   )
     throw new Error("INVALID_PRODUCT");
   return product;
 }
 
+function compareTraditionalChineseStroke_(left, right) {
+  return String(left || "").localeCompare(
+    String(right || ""),
+    "zh-Hant-TW-u-co-stroke",
+    { sensitivity: "base", numeric: true },
+  );
+}
+
+function normalizeCategoryOrder_(source) {
+  var values = Array.isArray(source) ? source : [];
+  return values
+    .map(function (value) {
+      return cleanText_(value, 30);
+    })
+    .filter(function (value, index, all) {
+      return value && all.indexOf(value) === index;
+    })
+    .slice(0, 100);
+}
+
+function sortProductsForDisplay_(products, settings) {
+  var categoryOrder = normalizeCategoryOrder_((settings || {}).categoryOrder);
+  var categoryIndexes = {};
+  categoryOrder.forEach(function (category, index) {
+    categoryIndexes[category] = index;
+  });
+  return products.slice().sort(function (a, b) {
+    var aHasCategoryOrder = Object.prototype.hasOwnProperty.call(
+      categoryIndexes,
+      a.category,
+    );
+    var bHasCategoryOrder = Object.prototype.hasOwnProperty.call(
+      categoryIndexes,
+      b.category,
+    );
+    if (aHasCategoryOrder !== bHasCategoryOrder)
+      return aHasCategoryOrder ? -1 : 1;
+    if (
+      aHasCategoryOrder &&
+      categoryIndexes[a.category] !== categoryIndexes[b.category]
+    )
+      return categoryIndexes[a.category] - categoryIndexes[b.category];
+    var categoryComparison = compareTraditionalChineseStroke_(
+      a.category,
+      b.category,
+    );
+    if (categoryComparison) return categoryComparison;
+
+    var aPinned = Number(a.featuredOrder) > 0;
+    var bPinned = Number(b.featuredOrder) > 0;
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+    if (aPinned && a.featuredOrder !== b.featuredOrder)
+      return a.featuredOrder - b.featuredOrder;
+    return (
+      compareTraditionalChineseStroke_(a.name, b.name) ||
+      String(b.updatedAt).localeCompare(String(a.updatedAt)) ||
+      String(a.id).localeCompare(String(b.id))
+    );
+  });
+}
+
 function readProducts_(settings) {
   var sheet = spreadsheet_().getSheetByName("Products");
   if (!sheet || sheet.getLastRow() < 2) return [];
-  var legacyExchangeRate = (settings || readSettings_()).exchangeRate;
+  settings = settings || readSettings_();
+  var legacyExchangeRate = settings.exchangeRate;
   var rows = sheet
     .getRange(2, 1, sheet.getLastRow() - 1, PRODUCT_HEADERS_.length)
     .getValues();
-  return rows
+  var products = rows
     .filter(function (row) {
       return String(row[0] || "").trim();
     })
     .map(function (row) {
       return rowToProduct_(row, legacyExchangeRate);
-    })
-    .sort(function (a, b) {
-      return (
-        a.sortOrder - b.sortOrder ||
-        String(b.updatedAt).localeCompare(String(a.updatedAt))
-      );
     });
+  return sortProductsForDisplay_(products, settings);
 }
 
 function rowToProduct_(row, legacyExchangeRate) {
@@ -4901,6 +4975,7 @@ function rowToProduct_(row, legacyExchangeRate) {
     archived: isArchived,
     stockQuantity: stockQuantity,
     sortOrder: number_(row[8]),
+    featuredOrder: number_(row[14]),
     createdAt: displayDate_(row[9]),
     updatedAt: displayDate_(row[10]),
   };
@@ -4938,6 +5013,15 @@ function readSettings_() {
     if (key === "saleClosedNotice")
       settings.saleClosedNotice =
         String(row[1] || "").trim() || DEFAULT_SETTINGS_.saleClosedNotice;
+    if (key === "categoryOrder") {
+      try {
+        settings.categoryOrder = normalizeCategoryOrder_(
+          JSON.parse(String(row[1] || "[]")),
+        );
+      } catch (error) {
+        settings.categoryOrder = [];
+      }
+    }
     if (key === "bankTransferInfo")
       settings.bankTransferInfo = String(row[1] || "").trim();
     if (key === "bankName") settings.bankName = String(row[1] || "").trim();
@@ -5076,6 +5160,7 @@ function ensureSettingsSheet_(ss) {
       ["preorderNotice", DEFAULT_SETTINGS_.preorderNotice, "前台預購說明"],
       ["saleClosed", DEFAULT_SETTINGS_.saleClosed, "前台停賣"],
       ["saleClosedNotice", DEFAULT_SETTINGS_.saleClosedNotice, "停賣公告"],
+      ["categoryOrder", "[]", "前台分類順序"],
       ["bankTransferInfo", "", "訂金匯款資訊"],
       ["bankName", "", "銀行名稱"],
       ["bankCode", "", "銀行代碼"],
