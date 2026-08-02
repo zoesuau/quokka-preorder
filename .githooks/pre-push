@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+remote_url="$2"
+must_verify=false
+
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    must_verify=true
+  fi
+done
+
+if [ "$must_verify" = "true" ]; then
+  echo "驗證鼠購易正式部署身分…"
+  PROJECT_PUSH_REMOTE_URL="$remote_url" \
+  BOUND_PROJECT_ID="quokka-preorder" \
+  BOUND_REPOSITORY="zoesuau/quokka-preorder" \
+  BOUND_PUBLIC_URL="https://zoesuau.github.io/quokka-preorder/" \
+  BOUND_BACKEND_URL="https://script.google.com/macros/s/AKfycbzh7CqO-u_2gRWvlvUPzOAE7bAEQOczgmO18DZq7XbmEU2BzZQJetXn6MzzmsxiZbAF/exec" \
+  BOUND_DATASTORE="backend-bound:quokka-preorder-production" \
+  BOUND_LIFF_ID="2010743514-C2ckA5v9" \
+  node scripts/verify-project-identity.mjs --deploy
+  node tests/project-isolation.test.js
+fi

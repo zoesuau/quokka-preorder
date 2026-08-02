@@ -1,0 +1,41 @@
+name: Project Isolation
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+env:
+  BOUND_PROJECT_ID: ${{ vars.PROJECT_ID }}
+  BOUND_REPOSITORY: ${{ vars.PROJECT_REPOSITORY }}
+  BOUND_PUBLIC_URL: ${{ vars.PROJECT_PUBLIC_URL }}
+  BOUND_BACKEND_URL: ${{ vars.PROJECT_BACKEND_URL }}
+  BOUND_DATASTORE: ${{ vars.PROJECT_DATASTORE }}
+  BOUND_LIFF_ID: ${{ vars.PROJECT_LIFF_ID }}
+
+jobs:
+  verify-project:
+    name: Verify project identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify repository and project bindings
+        run: node scripts/verify-project-identity.mjs --ci
+      - name: Verify cross-project failures are blocked
+        run: node tests/project-isolation.test.js
+      - name: Check JavaScript syntax
+        run: |
+          node --check storefront.js
+          node --check admin.js
+          node --input-type=module --check < webhook-worker/worker.js
+      - name: Run regression tests
+        run: |
+          for test_file in tests/*.test.js; do
+            node "$test_file"
+          done

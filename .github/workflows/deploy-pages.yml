@@ -1,0 +1,83 @@
+name: Deploy verified mouse purchase system
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: quokka-production-pages
+  cancel-in-progress: false
+
+env:
+  BOUND_PROJECT_ID: ${{ vars.PROJECT_ID }}
+  BOUND_REPOSITORY: ${{ vars.PROJECT_REPOSITORY }}
+  BOUND_PUBLIC_URL: ${{ vars.PROJECT_PUBLIC_URL }}
+  BOUND_BACKEND_URL: ${{ vars.PROJECT_BACKEND_URL }}
+  BOUND_DATASTORE: ${{ vars.PROJECT_DATASTORE }}
+  BOUND_LIFF_ID: ${{ vars.PROJECT_LIFF_ID }}
+
+jobs:
+  verify:
+    name: Verify exact production identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: node scripts/verify-project-identity.mjs --deploy
+      - run: node tests/project-isolation.test.js
+      - run: |
+          for test_file in tests/*.test.js; do
+            node "$test_file"
+          done
+
+  build:
+    name: Build allowlisted site artifact
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/configure-pages@v6
+      - name: Re-verify and build deployment artifact
+        run: |
+          node scripts/verify-project-identity.mjs --deploy --emit _site/deployment-identity.json
+          cp index.html admin.html style.css admin.css config.js storefront.js admin.js _site/
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy verified artifact
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  verify-live:
+    name: Verify live project identity
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: node scripts/verify-live-project.mjs --expected-sha "$GITHUB_SHA"

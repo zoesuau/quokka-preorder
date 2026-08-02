@@ -1,0 +1,6 @@
+* @zoesuau
+/project-identity.json @zoesuau
+/.github/ @zoesuau
+/.githooks/ @zoesuau
+/scripts/verify-project-identity.mjs @zoesuau
+/scripts/verify-live-project.mjs @zoesuau
