@@ -37,6 +37,10 @@ function git(args, root) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
 
+function normalizeRemoteUrl(value) {
+  return typeof value === "string" ? value.replace(/\.git\/?$/, "").replace(/\/$/, "") : value;
+}
+
 export function loadManifest(root = SCRIPT_ROOT) {
   const manifestPath = path.join(root, MANIFEST_NAME);
   let manifest;
@@ -96,8 +100,8 @@ export function validateIdentity(manifest, actual, context = {}) {
   same("LIFF", actual.liffId, manifest.identity?.liffId);
 
   if (context.gitRoot) same("Git repository root", path.resolve(context.gitRoot), path.resolve(context.expectedRoot));
-  if (context.remoteUrl) same("Git origin", context.remoteUrl, manifest.repository?.remoteUrl);
-  if (context.pushRemoteUrl) same("push remote", context.pushRemoteUrl, manifest.repository?.remoteUrl);
+  if (context.remoteUrl) same("Git origin", normalizeRemoteUrl(context.remoteUrl), normalizeRemoteUrl(manifest.repository?.remoteUrl));
+  if (context.pushRemoteUrl) same("push remote", normalizeRemoteUrl(context.pushRemoteUrl), normalizeRemoteUrl(manifest.repository?.remoteUrl));
   if (context.githubRepository) same("GitHub repository", context.githubRepository, manifest.repository?.slug);
 
   if (context.boundary || context.deploy) {

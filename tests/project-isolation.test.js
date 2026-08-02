@@ -17,6 +17,10 @@ const { pathToFileURL } = require("url");
   };
 
   assert.deepEqual(validateIdentity(manifest, actual, baseContext), []);
+  assert.deepEqual(validateIdentity(manifest, actual, {
+    ...baseContext,
+    remoteUrl: "https://github.com/zoesuau/quokka-preorder",
+  }), [], "GitHub checkout 省略 .git 時仍應辨識為同一 repository");
 
   const cases = [
     ["其他 repository", { ...baseContext, remoteUrl: "https://github.com/example/another-project.git" }],
