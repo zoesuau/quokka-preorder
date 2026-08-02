@@ -18,7 +18,7 @@ function test(name, fn) {
 
 function createHarness(initialCache = "") {
   const cache = new Map();
-  if (initialCache) cache.set("public-catalog-v2", initialCache);
+  if (initialCache) cache.set("public-catalog-v3", initialCache);
   const cacheCalls = { get: 0, put: 0, remove: 0 };
   const lockCalls = { wait: 0, release: 0 };
   const reads = { products: 0, settings: 0 };
@@ -61,6 +61,7 @@ function createHarness(initialCache = "") {
       saleClosed: false,
       saleClosedNotice: "已結束",
       depositPercent: 50,
+      categoryOrder: ["吊飾"],
     };
   };
   context.readProducts_ = (settings) => {
@@ -97,6 +98,7 @@ test("快取未命中時只讀一次商品與設定，並建立五分鐘快取",
   assert.equal(harness.reads.settings, 1);
   assert.equal(harness.reads.products, 1);
   assert.equal(harness.cacheCalls.put, 1);
+  assert.deepEqual(Array.from(result.settings.categoryOrder), ["吊飾"]);
   assert.equal(harness.lockCalls.wait, 1);
   assert.equal(harness.lockCalls.release, 1);
 });
@@ -121,7 +123,7 @@ test("快取失效會移除公開目錄", () => {
   const harness = createHarness(JSON.stringify({ ok: true }));
   harness.context.invalidatePublicCatalogCache_();
 
-  assert.equal(harness.cache.has("public-catalog-v2"), false);
+  assert.equal(harness.cache.has("public-catalog-v3"), false);
   assert.equal(harness.cacheCalls.remove, 1);
 });
 

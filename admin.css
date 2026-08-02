@@ -146,6 +146,13 @@
 .settings-note { margin: -3px 0 13px; color: var(--muted); font-size: .72rem; line-height: 1.6; }
 .settings-note.warning { padding: 9px 10px; border-left: 4px solid #e6b900; border-radius: 7px; background: #fff7da; color: #62531e; }
 .settings-formula { margin: 8px 0 0; padding: 10px 12px; border-radius: 11px; background: #e7f1f5; color: #47748e; font-size: .74rem; font-weight: 700; line-height: 1.55; }
+.category-order-list { display: grid; gap: 8px; margin-bottom: 13px; }
+.category-order-empty { margin: 0; padding: 14px; border-radius: 11px; background: #edf3f5; color: var(--muted); font-size: .75rem; text-align: center; }
+.category-order-item { display: grid; grid-template-columns: 30px minmax(0,1fr) 42px 42px; gap: 7px; align-items: center; min-height: 48px; padding: 7px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.category-order-item > b { color: #47748e; font-size: .72rem; text-align: center; }
+.category-order-item > span { overflow: hidden; font-size: .82rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.category-order-item button { min-height: 38px; padding: 0; border: 1px solid #b9d3df; border-radius: 9px; background: #edf5f8; color: #47748e; font-size: 1rem; font-weight: 800; }
+.category-order-item button:disabled { opacity: .35; }
 .settings-save-button { position: sticky; bottom: 14px; z-index: 4; box-shadow: 0 8px 22px rgba(38,76,96,.25); }
 .password-settings-form { margin-top: 14px; }
 .product-price-calculator { display: grid; gap: 0; margin: 12px 0; padding: 13px; border: 1px solid #b9d3df; border-radius: 14px; background: #f2f8fa; }

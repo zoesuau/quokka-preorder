@@ -27,12 +27,19 @@ const baseProduct = {
   description: "",
   active: true,
   sortOrder: 1,
+  featuredOrder: 0,
   stockQuantity: 1,
 };
 
 test("庫存為 0 時後端強制下架", () => {
   const product = context.validateProduct_({ ...baseProduct, stockQuantity: 0 });
   assert.equal(product.active, false);
+});
+
+test("置頂順序允許留白但拒絕負數與小數", () => {
+  assert.equal(context.validateProduct_(baseProduct).featuredOrder, 0);
+  assert.throws(() => context.validateProduct_({ ...baseProduct, featuredOrder: -1 }), /INVALID_PRODUCT/);
+  assert.throws(() => context.validateProduct_({ ...baseProduct, featuredOrder: 1.5 }), /INVALID_PRODUCT/);
 });
 
 test("既有未設定庫存的商品維持原上架狀態", () => {
