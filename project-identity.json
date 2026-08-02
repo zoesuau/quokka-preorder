@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "projectId": "quokka-preorder",
+  "displayName": "鼠購易｜韓國小物預購",
+  "repository": {
+    "slug": "zoesuau/quokka-preorder",
+    "remoteUrl": "https://github.com/zoesuau/quokka-preorder.git",
+    "productionBranch": "main"
+  },
+  "deployment": {
+    "provider": "github-pages",
+    "siteId": "zoesuau/quokka-preorder",
+    "environment": "production",
+    "publicUrl": "https://zoesuau.github.io/quokka-preorder/"
+  },
+  "frontend": {
+    "configFile": "config.js",
+    "indexFile": "index.html",
+    "adminFile": "admin.html",
+    "brandName": "鼠購易｜韓國小物預購",
+    "indexTitle": "鼠購易｜韓國小物預購",
+    "adminTitle": "鼠購易｜商品後台"
+  },
+  "backend": {
+    "provider": "google-apps-script",
+    "webAppUrl": "https://script.google.com/macros/s/AKfycbzh7CqO-u_2gRWvlvUPzOAE7bAEQOczgmO18DZq7XbmEU2BzZQJetXn6MzzmsxiZbAF/exec",
+    "datastoreBinding": "backend-bound:quokka-preorder-production"
+  },
+  "identity": {
+    "provider": "line-liff",
+    "liffId": "2010743514-C2ckA5v9"
+  }
+}
