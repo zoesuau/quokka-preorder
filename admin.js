@@ -702,9 +702,7 @@ async function handleOrderStatusChange(event) {
         }
       : { action: "adminUpdateOrderStatus", orderNo: select.dataset.statusOrder, status: next });
     if (!result.ok) throw new Error(result.error || "ORDER_UPDATE_FAILED");
-    const index = adminState.orders.findIndex((order) => order.orderNo === result.order.orderNo);
-    if (index >= 0) adminState.orders[index] = { ...adminState.orders[index], ...result.order };
-    renderAdminOrders();
+    await loadAdminProducts();
     if (next === "已取消") {
       showToast(result.order.notificationSent
         ? "訂單已取消並發送通知"
